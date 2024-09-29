@@ -39,6 +39,8 @@ import zlib
 from fnmatch import fnmatch
 import email.utils
 import signal
+import PySimpleGUI as sg
+
 if sys.version_info[0] < 3 or ( sys.version_info[0] < 4 and sys.version_info[1] < 7):
     import dateutil #pip package name is python-dateutil
 # python 2 / 3 imports
@@ -1552,7 +1554,41 @@ def process_argv(argv):
     g1.add_argument('-nolog', action='store_true', help = 'doesn\'t writes log file gogrepo.log')
     g1.add_argument('-debug', action='store_true', help = "Includes debug messages")
     
-    
+    g1 = sp1.add_parser('gui', help='Launch the tool using the GUI')
+    g1.add_argument('-nolog', action='store_true', help = 'doesn\'t writes log file gogrepo.log')
+    g1.add_argument('-debug', action='store_true', help = "Includes debug messages")
+    g2 = g1.add_mutually_exclusive_group()
+    g2.add_argument('-os', action=storeExtend, help='operating system(s)', nargs='*', default=[])
+    g2.add_argument('-skipos', action='store', help='skip operating system(s)', nargs='*', default=[])  
+    g3 = g1.add_mutually_exclusive_group()
+    g3.add_argument('-lang', action=storeExtend, help='game language(s)', nargs='*', default=[])
+    g3.add_argument('-skiplang', action='store', help='skip game language(s)', nargs='*', default=[])      
+    g1.add_argument('-skiphidden',action='store_true',help='skip games marked as hidden')
+    g1.add_argument('-installers', action='store', choices = ['standalone','both'], default = 'standalone',  help='GOG Installer type to use: standalone or both galaxy and standalone. Default: standalone (Deprecated)')    
+    g4 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g4.add_argument('-standard', action='store_true', help='new and updated games only (default unless -ids used)')    
+    g4.add_argument('-skipknown', action='store_true', help='skip games already known by manifest')
+    g4.add_argument('-updateonly', action='store_true', help='only games marked with the update tag')
+    g4.add_argument('-full', action='store_true', help='all games on your account (default if -ids used)')    
+    g5 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g5.add_argument('-ids', action='store', help='id(s)/titles(s) of (a) specific game(s) to update', nargs='*', default=[])
+    g5.add_argument('-skipids', action='store', help='id(s)/titles(s) of (a) specific game(s) not to update', nargs='*', default=[])
+    g1.add_argument('-wait', action='store', type=float,
+                    help='wait this long in hours before starting', default=0.0)  # sleep in hr
+    g6 = g1.add_mutually_exclusive_group()
+    g6.add_argument('-skipextras', action='store_true', help='skip verification of any GOG extra files')
+    g6.add_argument('-skipgames', action='store_true', help='skip verification of any GOG game files')
+    g1.add_argument('-skipgalaxy',action='store_true', help='skip verification of any GOG Galaxy installer files')
+    g1.add_argument('-skipstandalone',action='store_true', help='skip verification of any GOG standalone installer files')
+    g1.add_argument('-skipshared',action='store_true',help ='skip verification of any installers included in both the GOG Galalaxy and Standalone sets')
+    g1.add_argument('-resumemode',action="store",choices=['noresume','resume','onlyresume'],default='resume',help="how to handle resuming if necessary")
+    g1.add_argument('-strictverify',action="store_true",help="clear previously verified unless md5 match")
+    g1.add_argument('-strictdupe',action="store_true",help="missing MD5s do not default to checking only file size (missing MD5s only match other missing MD5s rather than any value)")
+    g1.add_argument('-lenientdownloadsupdate',action="store_false",help="Does not mark installers for updating, even if size and name match,  if the last updated time has changed and MD5s are not available or do not match")
+    g1.add_argument('-strictextrasupdate',action="store_true",help="Marks extras for updating, even if size and name match,  if the last updated time has changed and MD5s are not available or do not match  ")
+    g1.add_argument('-md5xmls',action="store_true",help="Downloads the MD5 XML files for each item (where available) and outputs them to !md5_xmls")
+    g1.add_argument('-nochangelogs',action="store_true",help="Skips saving the changelogs for games")
+
 
     g1 = p1.add_argument_group('other')
     g1.add_argument('-h', '--help', action='help', help='show help message and exit')
@@ -3633,7 +3669,62 @@ def cmd_clean(cleandir, dryrun):
             save_manifest(items)
     else:
         info('nothing to clean. nice and tidy!')
-        
+
+
+def item_row(item_num):
+    row =  sg.T(item_num)
+    return row
+
+def cmd_gui(args):
+    # All the stuff inside your window.
+    layout = []
+    try:
+        makeGOGSession()
+        layout = [  [sg.Text('Click the Update button below to populate the list with your GOG Games', font='_ 15')],
+                [sg.Col([], k='-TRACKING SECTION-')],
+                [sg.Button('Update List', enable_events=True, k='Update List', tooltip='Populate Game List')]]
+
+    except (KeyError, AttributeError):
+        layout = [ [sg.Text('You do not have a valid GOG Session. Please Log in')],[[sg.Text('Enter GOG Email'), sg.InputText()], [sg.Text('Enter GOG Password'), sg.InputText()], [sg.Button('Login'),  sg.Button('Cancel')]]]
+
+    # Create the Window
+    window = sg.Window('GOG Downloader', layout, metadata=0)
+
+    all_games = load_manifest()
+    for game in all_games:
+        print(game.title)
+        window.metadata += 1
+        window.extend_layout(window['-TRACKING SECTION-'], [item_row(game.title)])
+
+    # Event Loop to process "events" and get the "values" of the inputs
+    while True:
+        event, values = window.read()
+
+        # if user closes window or clicks cancel
+        if event == sg.WIN_CLOSED or event == 'Cancel':
+            break
+        elif event == "Ok":
+            print('ok')
+
+        elif event == "Login":
+            if len(values[0]) == 0 or len(values[1]) == 0:
+                sg.popup_no_titlebar("You must enter both an email & password")
+                break
+            try:
+                cmd_login(values[0], values[1])
+                if sg.popup_ok("Login successful. Please restart the application") == 'OK':
+                    exit()
+            except Exception as e:
+                sg.Print(f"Login failed. Please close and try again: {e}")
+        if event == 'Update List':
+            sg.popup_non_blocking("Updating the game list. Please watch the console for updates.")
+            cmd_update(args.os, args.lang, args.skipknown, args.updateonly, not args.full, args.ids, args.skipids,args.skiphidden,args.installers,args.resumemode,args.strictverify,args.strictdupe,args.lenientdownloadsupdate,args.strictextrasupdate,args.md5xmls,args.nochangelogs)
+            if sg.popup_ok("Game list Updated. You will have to restart the app for it to update on the GUI") == "OK":
+                exit()
+
+    window.close()
+    
+
 def update_self():
     #To-Do: add auto-update to main using Last-Modified (repo for rolling, latest release for standard)
     #Add a dev mode which skips auto-updates and a manual update command which can specify rolling/standard
@@ -3800,6 +3891,23 @@ def main(args):
         cmd_clean(args.cleandir, args.dryrun)
     elif args.command == "trash":
         cmd_trash(args.gamedir,args.installersonly,args.dryrun)
+    elif args.command == 'gui':
+        if not args.os:    
+            if args.skipos:
+                args.os = [x for x in VALID_OS_TYPES if x not in args.skipos]
+            else:
+                args.os = VALID_OS_TYPES
+        if not args.lang:    
+            if args.skiplang:
+                args.lang = [x for x in VALID_LANG_TYPES if x not in args.skiplang]
+            else:
+                args.lang = VALID_LANG_TYPES
+        if args.skipgames:
+            args.skipstandalone = True
+            args.skipgalaxy = True
+            args.skipshared = True
+        cmd_gui(args)
+        return
 
     etime = datetime.datetime.now()
     info('--')
