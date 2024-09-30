@@ -40,6 +40,9 @@ from fnmatch import fnmatch
 import email.utils
 import signal
 import PySimpleGUI as sg
+import platform
+
+from pathlib import Path
 
 if sys.version_info[0] < 3 or (sys.version_info[0] < 4 and sys.version_info[1] < 7):
     import dateutil  # pip package name is python-dateutil
@@ -2595,6 +2598,33 @@ def process_argv(argv):
         action="store_true",
         help="Skips saving the changelogs for games",
     )
+    g1.add_argument(
+        "-dryrun",
+        action="store_true",
+        help="do not move files, only display what would be trashed",
+    )
+    g1.add_argument(
+        "-skipfiles",
+        action="store",
+        help="file name (or glob patterns) to NOT verify",
+        nargs="*",
+        default=[],
+    )
+    g1.add_argument(
+        "-covers", action="store_true", help="downloads cover images for each game"
+    )
+    g1.add_argument(
+        "-backgrounds",
+        action="store_true",
+        help="downloads background images for each game",
+    )
+    g1.add_argument(
+        "-downloadlimit",
+        action="store",
+        type=float,
+        help="limit downloads to this many MB (approximately)",
+        default=None,
+    )  # sleep in hr
 
     g1 = p1.add_argument_group("other")
     g1.add_argument("-h", "--help", action="help", help="show help message and exit")
@@ -5429,8 +5459,8 @@ def get_theme():
     except:
         global_theme = sg.theme()
     # Get theme from user settings for this program.  Use global theme if no entry found
-    user_theme = sg.user_settings_get_entry('-theme-', '')
-    if user_theme == '':
+    user_theme = sg.user_settings_get_entry("-theme-", "")
+    if user_theme == "":
         user_theme = global_theme
     return user_theme
 
@@ -5442,79 +5472,109 @@ def get_game_list():
     for game in all_games:
         print(game.title)
         game_list.append(game.title)
-    
+
     return sorted(game_list)
 
 
-def cmd_gui(args):
-    ML_KEY = '-ML-'
+def download_games_gui(selected_games, args, download_path):
+    if len(selected_games) == 0:
+        sg.popup_error(
+            "You did not select any games. You must select at least one game to download"
+        )
+    else:
+        # kick off the download
+        sg.popup_non_blocking(
+            "Downloading the selected games. Watch the console window for progress...",
+            no_titlebar=True,
+        )
+        # TODO: add in disabling the download button to prevent spamming the downloads
 
+        cmd_download(
+            download_path,
+            args.skipextras,
+            args.skipids,
+            args.dryrun,
+            selected_games,
+            args.os,
+            args.lang,
+            args.skipgalaxy,
+            args.skipstandalone,
+            args.skipshared,
+            args.skipfiles,
+            args.covers,
+            args.backgrounds,
+            args.downloadlimit,
+        )
+
+
+def cmd_gui(args):
     theme = get_theme()
     if not theme:
         theme = sg.OFFICIAL_PYSIMPLEGUI_THEME
     sg.theme(theme)
 
-    find_tooltip = "Find in file\nEnter a string in box to search for string inside of the files.\nFile list will update with list of files string found inside."
-    filter_tooltip = "Filter files\nEnter a string in box to narrow down the list of files.\nFile list will update with list of files with string in filename."
-    find_re_tooltip = "Find in file using Regular Expression\nEnter a string in box to search for string inside of the files.\nSearch is performed after clicking the FindRE button."
-
-
-    left_col = sg.Col([
-        [sg.Listbox(values=get_game_list(), select_mode=sg.SELECT_MODE_EXTENDED, size=(50, 20), key='-DEMO LIST-')],
-        [sg.Text('Filter:', tooltip=filter_tooltip), sg.Input(size=(25, 1), enable_events=True, key='-FILTER-', tooltip=filter_tooltip),
-         sg.T(size=(15,1), k='-FILTER NUMBER-')],
-        [sg.Button('Run'), sg.B('Edit'), sg.B('Clear'), sg.B('Open Folder')],
-        [sg.Text('Find:', tooltip=find_tooltip), sg.Input(size=(25, 1), enable_events=True, key='-FIND-', tooltip=find_tooltip),
-         sg.T(size=(15,1), k='-FIND NUMBER-')],
-    ], element_justification='l')
-
-    lef_col_find_re = sg.pin(sg.Col([
-        [sg.Text('Find:', tooltip=find_re_tooltip), sg.Input(size=(25, 1),key='-FIND RE-', tooltip=find_re_tooltip),sg.B('Find RE')]], k='-RE COL-'))
+    left_col = sg.Col(
+        [
+            [
+                sg.Listbox(
+                    values=get_game_list(),
+                    select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
+                    size=(50, 20),
+                    key="-LEFT-",
+                )
+            ],
+            [
+                sg.Button(
+                    "Update List",
+                    enable_events=True,
+                    k="Update List",
+                    tooltip="Populate Game List",
+                )
+            ],
+        ],
+        element_justification="l",
+    )
 
     right_col = [
-        [sg.Multiline(size=(70, 21), write_only=True, key=ML_KEY, reroute_stdout=True, echo_stdout_stderr=True)],
-        [sg.Button('Edit Me (this program)'), sg.B('Settings'), sg.Button('Exit')],
-        [sg.T('PySimpleGUI ver ' + sg.version.split(' ')[0] + '  tkinter ver ' + sg.tclversion_detailed, font='Default 8', pad=(0,0))],
+        [
+            sg.Listbox(
+                values=[],
+                size=(50, 20),
+                key="-RIGHT-",
+                select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
+            )
+        ],
+        [sg.Button("Download Selected Games", k="-DOWNLOADBUTTON-"), sg.Button("Exit")],
     ]
 
-    options_at_bottom = sg.pin(sg.Column([[sg.CB('Verbose', enable_events=True, k='-VERBOSE-'),
-                         sg.CB('Show only first match in file', default=True, enable_events=True, k='-FIRST MATCH ONLY-'),
-                         sg.CB('Find ignore case', default=True, enable_events=True, k='-IGNORE CASE-'),
-                         sg.T('<---- NOTE: Only the "Verbose" setting is implemented at this time')]], pad=(0,0), k='-OPTIONS BOTTOM-'))
-
-    choose_folder_at_top = sg.pin(sg.Column([[sg.T('Click settings to set top of your tree or choose a previously chosen folder'),
-                                       sg.Combo(sorted(sg.user_settings_get_entry('-folder names-', [])), default_value=sg.user_settings_get_entry('-demos folder-', ''), size=(50, 1), key='-FOLDERNAME-', enable_events=True, readonly=True)]], pad=(0,0), k='-FOLDER CHOOSE-'))
+    choose_folder_at_top = [
+        [
+            sg.Text("Folder"),
+            sg.In(size=(25, 1), enable_events=True, key="-FOLDER-"),
+            sg.FolderBrowse(),
+        ]
+    ]
     # ----- Full layout -----
 
-    layout = [[sg.Text('PySimpleGUI Demo Program & Project Browser', font='Any 20')],
-              [choose_folder_at_top],
-              sg.vtop([sg.Column([[left_col],[ lef_col_find_re]], element_justification='l'), sg.Col(right_col, element_justification='c') ]),
-              [options_at_bottom]
-              ]
+    layout = [
+        [sg.Text("GOG Game Downloader", font="Any 20")],
+        [choose_folder_at_top],
+        sg.vtop(
+            [
+                sg.Column([[left_col]], element_justification="l"),
+                sg.Column(
+                    [[sg.Button(">>", key="-MOVE-")], [sg.Button("<<", key="-REMOVE-")]]
+                ),
+                sg.Col(right_col, element_justification="c"),
+            ]
+        ),
+    ]
 
     # --------------------------------- Create Window ---------------------------------
-
 
     # All the stuff inside your window.
     try:
         makeGOGSession()
-        # layout = [
-        #     [
-        #         sg.Text(
-        #             "Click the Update button below to populate the list with your GOG Games",
-        #             font="_ 15",
-        #         )
-        #     ],
-        #     [sg.Col([], k="-TRACKING SECTION-")],
-        #     [
-        #         sg.Button(
-        #             "Update List",
-        #             enable_events=True,
-        #             k="Update List",
-        #             tooltip="Populate Game List",
-        #         )
-        #     ],
-        # ]
 
     except (KeyError, AttributeError):
         layout = [
@@ -5527,14 +5587,15 @@ def cmd_gui(args):
         ]
 
     # Create the Window
-    window = sg.Window('PSG Demo & Project Browser', layout, finalize=True, metadata=0)
+    window = sg.Window("GOG Downloader", layout, finalize=True, metadata=0)
 
     # Event Loop to process "events" and get the "values" of the inputs
     while True:
         event, values = window.read()
+        print(event)
 
         # if user closes window or clicks cancel
-        if event == sg.WIN_CLOSED or event == "Cancel":
+        if event == sg.WIN_CLOSED or event == "Cancel" or event == "Exit":
             break
         elif event == "Ok":
             print("ok")
@@ -5552,7 +5613,7 @@ def cmd_gui(args):
                     exit()
             except Exception as e:
                 sg.Print(f"Login failed. Please close and try again: {e}")
-        if event == "Update List":
+        elif event == "Update List":
             sg.popup_non_blocking(
                 "Updating the game list. Please watch the console for updates."
             )
@@ -5581,6 +5642,48 @@ def cmd_gui(args):
                 == "OK"
             ):
                 exit()
+
+        elif event == "-DOWNLOADBUTTON-":
+            if len(values["-FOLDER-"]) == 0:
+                print("Save path not specified. Saving to desktop...")
+                if platform.system() == "Windows":
+                    download_folder = os.path.join(os.environ["USERPROFILE"], "Desktop")
+                else:
+                    download_folder = os.path.join(os.path.expanduser("~"), "Desktop")
+            else:
+                download_folder = Path(values["-FOLDER-"])
+
+            print(f"I will download games to {download_folder}")
+            print(f"I will download these games: {window['-RIGHT-'].get_list_values()}")
+            download_games_gui(
+                window["-RIGHT-"].get_list_values(), args, download_folder
+            )
+
+        # Move items to the right list
+        elif event == "-MOVE-" and values["-LEFT-"]:
+            selected_items = values["-LEFT-"]
+            right_items = window["-RIGHT-"].get_list_values()
+            # Add selected items to the right listbox
+            window["-RIGHT-"].update(values=right_items + list(selected_items))
+            # Remove selected items from the left listbox
+            left_items = [
+                item for item in get_game_list() if item not in selected_items
+            ]
+            window["-LEFT-"].update(values=left_items)
+
+        # Remove items from the right list
+        elif event == "-REMOVE-" and values["-RIGHT-"]:
+            selected_items = values["-RIGHT-"]
+            right_items = [
+                item
+                for item in window["-RIGHT-"].get_list_values()
+                if item not in selected_items
+            ]
+            window["-RIGHT-"].update(values=right_items)
+            # Add the removed items back to the left listbox
+            window["-LEFT-"].update(
+                values=window["-LEFT-"].get_list_values() + list(selected_items)
+            )
 
     window.close()
 
