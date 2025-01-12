@@ -8,7 +8,7 @@ idna==3.10
 pyasn1==0.6.1
 pycparser==2.22
 pyOpenSSL==24.2.1
-PySimpleGUI==5.0.6
+PySimpleGUI==5.0.7
 requests==2.32.3
 rsa==4.9
 six==1.16.0
