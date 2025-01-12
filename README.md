@@ -205,12 +205,35 @@ new GOG folder with clean game directory names and file names as GOG has them na
     -dryrun     	do not move files, only display what would be trashed
 	-installersonly only delete file types used as installers
 
+``gogrepoc.py gui`` Starts the GUI interface. 
+
+    None
 --
 
 Other arguments:
 	-h, --help  	show help message and exit. Used in all commands.
 	-nolog 			don't write to log file gogrepo.log. Used in all commands.
 	-v, --version	show version number and exit. Used in all commands.
+
+
+GUI
+------------
+The GUI is really simple, written in PySimpleGUI. A barebones implementation of the CLI commands. It's not as feature-rich as the CLI, but it's a good starting point for those who don't want to use the CLI.
+Requires logging in via the CLI first, but afterwards, the session stays persistent. 
+
+Generates a list of all games from your account that comes from the manifest file. You can then select which games you want to download.
+
+Makes grabbing specific games acquired over time easier, as you do not have to search your manifest file for the specific game ID.
+
+Allows for easily setting a specified download directory.
+
+
+Compression Script
+------------
+A simple Python based compression script is included in `compress.py`. Requires 7-Zip (or a fork of it like Nanazip) to be installed on your machine. 
+
+Useful for systems storing games on a NAS, where storage space can be a premium. Or for systems like GameVault where the library requires a specific format.
+
 
 Requirements
 ------------
@@ -222,6 +245,7 @@ I recommend you use `pip` to install the above python modules.
 
   ``pip install html5lib html2text``
 
+
 Optional
 ------------------------
 
@@ -231,6 +255,7 @@ Optional
 Mac:
 * caffeinate support (optional, required to prevent suspend/sleep interrupts)
 * dateutils ( py-dateutils on pip )  (required but only for python < 3.7 )
+
 
 TODO
 ----
