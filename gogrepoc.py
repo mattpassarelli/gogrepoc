@@ -1801,8 +1801,8 @@ def cmd_login(user, passwd):
     etree = html5lib.parse(page_response.text, namespaceHTMLElements=False)
     # Bail if we find a request for a reCAPTCHA *in the login form*
     loginForm = etree.find('.//form[@name="login"]')
-    if (not loginForm) or len(loginForm.findall('.//div[@class="g-recaptcha form__recaptcha"]')) > 0:
-        if not loginForm:
+    if (loginForm is None) or len(loginForm.findall('.//div[@class="g-recaptcha form__recaptcha"]')) > 0:
+        if loginForm is None:
             error("Could not locate login form on login page to test for reCAPTCHA, please contact the maintainer. In the meantime use a browser (Firefox recommended) to sign in at the below url and then copy & paste the full URL")
         else:
             error("gog is asking for a reCAPTCHA :(  Please use a browser (Firefox recommended) to sign in at the below url and then copy & paste the full URL")
@@ -1828,7 +1828,13 @@ def cmd_login(user, passwd):
                                                    'login[login]': '',
                                                    'login[_token]': token_data['login_token']}) 
         etree = html5lib.parse(page_response.text, namespaceHTMLElements=False)
-        if 'two_step' in page_response.url:
+        if 'totp' in page_response.url:
+            token_data['totp_url'] = page_response.url
+            for elm in etree.findall('.//input'):
+                if elm.attrib['id'] == 'two_factor_totp_authentication__token':
+                    token_data['totp_token'] = elm.attrib['value']
+                    break
+        elif 'two_step' in page_response.url:
             token_data['two_step_url'] = page_response.url
             for elm in etree.findall('.//input'):
                 if elm.attrib['id'] == 'second_step_authentication__token':
@@ -1841,7 +1847,25 @@ def cmd_login(user, passwd):
             
 
         # perform two-step if needed
-        if token_data['two_step_url'] is not None:
+        if token_data['totp_url'] is not None:
+            token_data['totp_security_code'] = input("enter Authenticator security code: ")
+            
+            # Send the security code back to GOG
+            page_response= request(loginSession,token_data['totp_url'], 
+                         data={'two_factor_totp_authentication[token][letter_1]': token_data['totp_security_code'][0],
+                               'two_factor_totp_authentication[token][letter_2]': token_data['totp_security_code'][1],
+                               'two_factor_totp_authentication[token][letter_3]': token_data['totp_security_code'][2],
+                               'two_factor_totp_authentication[token][letter_4]': token_data['totp_security_code'][3],
+                               'two_factor_totp_authentication[token][letter_5]': token_data['totp_security_code'][4],
+                               'two_factor_totp_authentication[token][letter_6]': token_data['totp_security_code'][5],
+                               'two_factor_totp_authentication[send]': "",
+                               'two_factor_totp_authentication[_token]': token_data['totp_token']})
+            if 'on_login_success' in page_response.url:
+                parsed = urlparse(page_response.url)    
+                query_parsed = parse_qs(parsed.query)
+                token_data['login_code'] = query_parsed['code']
+
+        elif token_data['two_step_url'] is not None:
             token_data['two_step_security_code'] = input("enter two-step security code: ")
 
             # Send the security code back to GOG
