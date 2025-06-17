@@ -153,11 +153,12 @@ GOG_LOGIN_URL = r'https://login.gog.com/login_check'
 
 #GOG Galaxy URLs
 GOG_AUTH_URL = r'https://auth.gog.com/auth'
-GOG_GALAXY_REDIRECT_URL = r'https://embed.gog.com/on_login_success'
-GOG_CLIENT_ID = '46899977096215655'
-GOG_SECRET = '9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9'
 GOG_TOKEN_URL = r'https://auth.gog.com/token'
 GOG_EMBED_URL = r'https://embed.gog.com'
+GOG_GALAXY_REDIRECT_URL = GOG_EMBED_URL + r'/on_login_success'
+GOG_CLIENT_ID = '46899977096215655'
+GOG_SECRET = '9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9'
+
 
 # GOG Constants
 GOG_MEDIA_TYPE_GAME  = '1'
@@ -342,7 +343,7 @@ def renew_token(session,retries=HTTP_RETRY_COUNT,delay=None):
             if time_now + 300 > session.token['expiry']:
                 info('refreshing token')
                 try:
-                    token_response = session.get(GOG_TOKEN_URL,params={'client_id':'46899977096215655' ,'client_secret':'9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9', 'grant_type': 'refresh_token','refresh_token': session.token['refresh_token']})   
+                    token_response = session.get(GOG_TOKEN_URL,params={'client_id':GOG_CLIENT_ID ,'client_secret':GOG_SECRET, 'grant_type': 'refresh_token','refresh_token': session.token['refresh_token']})   
                     token_response.raise_for_status()    
                 except Exception as e:
                         if retries > 0:
@@ -1593,7 +1594,7 @@ def process_argv(argv):
                     
 
     g1 = sp1.add_parser('download', help='Download all your GOG games and extra files')    
-    g1.add_argument('savedir', action='store', help='directory to save downloads to', nargs='?', default='.')
+    g1.add_argument('savedir', action='store', help='directory to save downloads to', nargs='?', default=GAME_STORAGE_DIR)
     g1.add_argument('-dryrun', action='store_true', help='display, but skip downloading of any files')
     g1.add_argument('-skipgalaxy', action='store_true', help='skip downloading Galaxy installers (Deprecated)' )
     g1.add_argument('-skipstandalone', action='store_true', help='skip downloading standlone installers (Deprecated)')
@@ -1671,7 +1672,7 @@ def process_argv(argv):
 
 
     g1 = sp1.add_parser('verify', help='Scan your downloaded GOG files and verify their size, MD5, and zip integrity')
-    g1.add_argument('gamedir', action='store', help='directory containing games to verify', nargs='?', default='.')
+    g1.add_argument('gamedir', action='store', help='directory containing games to verify', nargs='?', default=GAME_STORAGE_DIR)
     g1.add_argument('-permissivechangeclear', action='store_true', help='clear change marking for files that pass this test (default is to only clear on MD5 match) ')    
     g1.add_argument('-forceverify', action='store_true', help='also verify files that are unchanged (by gogrepo) since they were last successfully verified')    
     g1.add_argument('-skipmd5', action='store_true', help='do not perform MD5 check')
@@ -1783,6 +1784,9 @@ def cmd_login(user, passwd):
                   'passwd': login_data['passwd'],
                   'auth_url': None,
                   'login_token': None,
+                  'totp_url': None,
+                  'totp_token': None,
+                  'totp_security_code': None,
                   'two_step_url': None,
                   'two_step_token': None,
                   'two_step_security_code': None,
@@ -1883,7 +1887,7 @@ def cmd_login(user, passwd):
                         
     if token_data['login_code']:
         token_start = time.time()
-        token_response = request(loginSession,GOG_TOKEN_URL,args={'client_id':'46899977096215655' ,'client_secret':'9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9', 'grant_type': 'authorization_code','code': token_data['login_code'],'redirect_uri': 'https://embed.gog.com/on_login_success?origin=client'})    
+        token_response = request(loginSession,GOG_TOKEN_URL,args={'client_id':GOG_CLIENT_ID ,'client_secret':GOG_SECRET, 'grant_type': 'authorization_code','code': token_data['login_code'],'redirect_uri': GOG_GALAXY_REDIRECT_URL + '?origin=client'})    
         token_json = token_response.json()
         token_json['expiry'] = token_start + token_json['expires_in']
         save_token(token_json)           
