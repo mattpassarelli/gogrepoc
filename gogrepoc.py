@@ -4150,6 +4150,36 @@ def cmd_gui(args):
             sg.popup_non_blocking(
                 "Updating the game list. Please watch the console for updates."
             )
+
+            if getattr(args, "skipknown", None) is None:
+                args.skipknown = True
+            if getattr(args, "updateonly", None) is None:
+                args.updateonly = False
+            if getattr(args, "full", None) is None:
+                args.full = True
+            if getattr(args, "ids", None) is None:
+                args.ids = []
+            if getattr(args, "skipids", None) is None:
+                args.skipids = []   
+            if getattr(args, "skiphidden", None) is None:
+                args.skiphidden = False
+            if getattr(args, "installers", None) is None:
+                args.installers = "standalone"
+            if getattr(args, "resumemode", None) is None:
+                args.resumemode = "noresume"
+            if getattr(args, "strictverify", None) is None:
+                args.strictverify = False
+            if getattr(args, "strictdupe", None) is None:
+                args.strictdupe = False
+            if getattr(args, "lenientdownloadsupdate", None) is None:
+                args.lenientdownloadsupdate = True
+            if getattr(args, "strictextrasupdate", None) is None:
+                args.strictextrasupdate = False
+            if getattr(args, "md5xmls", None) is None:
+                args.md5xmls = False
+            if getattr(args, "nochangelogs", None) is None:
+                args.nochangelogs = True
+
             cmd_update(
                 args.os,
                 args.lang,
