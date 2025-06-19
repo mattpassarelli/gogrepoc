@@ -99,7 +99,7 @@ update or download command. Run this once first before doing update and download
 
 ``gogrepoc.py download`` Use the saved manifest file from an update command, and download all known game items and bonus files.
 
-    download [-dryrun] [-skipextras] [-skipextras] [-skipgames] [-wait WAIT] [-id <title>] [savedir]
+    download [savedir] [-dryrun] [-skipextras] [-skipextras] [-skipgames] [-wait WAIT] [-id <title>]
     savedir      	   directory to save downloads to
     -dryrun      	   display, but skip downloading of any files
     -skipextras  	   skip downloading of any GOG extra files
@@ -124,7 +124,7 @@ update or download command. Run this once first before doing update and download
 ``gogrepoc.py verify`` Check all your game files against the save manifest data, and verify MD5, zip integrity, and
 expected file size. Any missing or corrupt files will be reported.
 
-    verify [-skipmd5] [-skipsize] [-skipzip] [-delete] [gamedir]
+    verify [gamedir] [-skipmd5] [-skipsize] [-skipzip] [-delete]
     gamedir     directory containing games to verify
 	-forceverify (also verify files that are unchanged (by gogrepo) since they were last successfully verified)
     -skipmd5    	   do not perform MD5 check
@@ -192,7 +192,7 @@ new GOG folder with clean game directory names and file names as GOG has them na
 
 ``gogrepoc.py clean`` Clean your games directory of files not known by manifest. Moves files to the !orphaned folder.
 
-    clean [-dryrun] [cleandir]
+    clean [cleandir] [-dryrun]
     cleandir    root directory containing gog games to be cleaned
     -dryrun     do not move files, only display what would be cleaned
 	
@@ -200,7 +200,7 @@ new GOG folder with clean game directory names and file names as GOG has them na
 
 ``gogrepoc.py trash`` Permanently remove orphaned files in your game directory.
 
-    trash [-dryrun] [-installersonly] [gamedir]
+    trash [gamedir] [-dryrun] [-installersonly] 
     gamedir    		root directory containing gog games
     -dryrun     	do not move files, only display what would be trashed
 	-installersonly only delete file types used as installers
@@ -246,10 +246,13 @@ Useful for systems storing games on a NAS, where storage space can be a premium.
 
 Requirements
 ------------
-* Python 2.7 / Python 3
+* Python 2.7 / Python 3.8+
 * html5lib 0.99999 or later (https://github.com/html5lib/html5lib-python)
 * requests
-* pyOpenSSL
+* psutil
+Python 2.7 also requires
+* dateutil ( python-dateutil on pip )
+* pytz
 I recommend you use `pip` to install the above python modules.
 
   ``pip install html5lib html2text``
@@ -263,15 +266,15 @@ Optional
 * dbus-python and required dependencies (*nix, optional, used to prevent suspend/sleep interrupts on *nix, where supported) (this will likely move to pydbus as it matures)
 Mac:
 * caffeinate support (optional, required to prevent suspend/sleep interrupts)
-* dateutils ( py-dateutils on pip )  (required but only for python < 3.7 )
+
 
 
 TODO
 ----
 * ~~add ability to update and download specific games or new-items only~~
-* ~~add 'clean' command to orphan/remove old or unexpected files to keep your collection clean with only the latest files
-* support resuming manifest updating
+* ~~add 'clean' command to orphan/remove old or unexpected files to keep your collection clean with only the latest files~~
+* ~~support resuming manifest updating~~
 * ~~add support for incremental manifest updating (ie. only fetch newly added games) rather than fetching entire collection information~~
-* ability to customize/remap default game directory name
+* ~~ability to customize/remap default game directory name~~
 * add GOG movie support
 * ... feel free to contact me with ideas or feature requests!

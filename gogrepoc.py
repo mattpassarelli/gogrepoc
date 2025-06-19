@@ -1,13 +1,22 @@
 # -*- coding: utf-8 -*-
-
 from __future__ import print_function
 from __future__ import division
 from __future__ import unicode_literals
 
+# The following code block between #START# and #END#
+# generates an error message if this script is called as a shell script.
+# Using a "shebang" instead would fail on Windows.
+# START#
+if False:
+    print(
+        "Please start this script with a python interpreter: python /path/to/gogrepoc.py"
+    )
+# END#
 __appname__ = "gogrepoc.py"
 __author__ = "eddie3,kalaynr"
 __version__ = "0.4.0-a"
 __url__ = "https://github.com/kalanyr/gogrepoc"
+
 
 # imports
 import subprocess
@@ -33,7 +42,8 @@ import logging.handlers
 import ctypes
 import requests
 import re
-import OpenSSL
+
+# import OpenSSL
 import platform
 import locale
 import zlib
@@ -42,11 +52,27 @@ import email.utils
 import signal
 import PySimpleGUI as sg
 import platform
-
 from pathlib import Path
 
-if sys.version_info[0] < 3 or (sys.version_info[0] < 4 and sys.version_info[1] < 7):
+import psutil
+
+minPy2 = [2, 7]
+minPy3 = [3, 8]
+
+if sys.version_info[0] < 3:
+    if sys.version_info[0] < minPy2[0] or sys.version_info[1] < minPy2[1]:
+        print("Your Python version is not supported, please update to 2.7+")
+        sys.exit(1)
+elif sys.version_info[0] < 4:
+    if sys.version_info[0] < minPy3[0] or sys.version_info[1] < minPy3[1]:
+        print("Your Python version is not supported, please update to 3.8+")
+        sys.exit(1)
+
+if sys.version_info[0] < 3:
     import dateutil  # pip package name is python-dateutil
+    import dateutil.parser
+    import pytz
+    import string
 # python 2 / 3 imports
 try:
     # python 2
@@ -129,6 +155,8 @@ GAME_STORAGE_DIR = r"."
 TOKEN_FILENAME = r"gog-token.dat"
 MANIFEST_FILENAME = r"gog-manifest.dat"
 RESUME_MANIFEST_FILENAME = r"gog-resume-manifest.dat"
+TEMP_EXT = r".tmp"
+BACKUP_EXT = r".bak"
 CONFIG_FILENAME = r"gog-config.dat"
 SERIAL_FILENAME = r"!serial.txt"
 INFO_FILENAME = r"!info.txt"
@@ -145,11 +173,12 @@ GOG_LOGIN_URL = r"https://login.gog.com/login_check"
 
 # GOG Galaxy URLs
 GOG_AUTH_URL = r"https://auth.gog.com/auth"
-GOG_GALAXY_REDIRECT_URL = r"https://embed.gog.com/on_login_success"
-GOG_CLIENT_ID = "46899977096215655"
-GOG_SECRET = "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9"
 GOG_TOKEN_URL = r"https://auth.gog.com/token"
 GOG_EMBED_URL = r"https://embed.gog.com"
+GOG_GALAXY_REDIRECT_URL = GOG_EMBED_URL + r"/on_login_success"
+GOG_CLIENT_ID = "46899977096215655"
+GOG_SECRET = "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9"
+
 
 # GOG Constants
 GOG_MEDIA_TYPE_GAME = "1"
@@ -200,14 +229,14 @@ LANG_TABLE = {
 
 VALID_OS_TYPES = ["windows", "linux", "mac"]
 VALID_LANG_TYPES = list(LANG_TABLE.keys())
-if sys.version_info[0] >= 3:
-    universalLineEnd = ""
-else:
-    universalLineEnd = "U"
-if (sys.version_info[0] == 3 and sys.version_info[1] >= 8) or sys.version_info[0] >= 4:
-    storeExtend = "extend"
-else:
+
+universalLineEnd = ""
+storeExtend = "extend"
+uLongPathPrefix = "\\\\?\\"
+
+if sys.version_info[0] < 3:
     storeExtend = "store"
+    universalLineEnd = "U"
 
 
 DEFAULT_FALLBACK_LANG = "en"
@@ -217,6 +246,9 @@ sysOS = platform.system()
 sysOS = sysOS.lower()
 if sysOS == "darwin":
     sysOS = "mac"
+if sysOS == "java":
+    print("Jython is not currently supported. Let me know if you want Jython support.")
+    sys.exit(1)
 if not (sysOS in VALID_OS_TYPES):
     sysOS = "linux"
 DEFAULT_OS_LIST = [sysOS]
@@ -239,11 +271,12 @@ SKIP_MD5_FILE_EXT = [
 ]  # Removed tar.gz as it can have md5s and is actually parsed as .gz so wasn't working
 for i in range(1, 21):
     n = i
-    a = "." + f"{n:03}"
+    a = "." + "%03d" % n
     SKIP_MD5_FILE_EXT.append(a)
+
 INSTALLERS_EXT = [".exe", ".bin", ".dmg", ".pkg", ".sh"]
 
-
+MD5_DIR_NAME = "!md5_xmls"
 ORPHAN_DIR_NAME = "!orphaned"
 DOWNLOADING_DIR_NAME = "!downloading"
 PROVISIONAL_DIR_NAME = "!provisional"
@@ -253,6 +286,7 @@ ORPHAN_DIR_EXCLUDE_LIST = [
     ORPHAN_DIR_NAME,
     DOWNLOADING_DIR_NAME,
     IMAGES_DIR_NAME,
+    MD5_DIR_NAME,
     "!misc",
 ]
 ORPHAN_FILE_EXCLUDE_LIST = [INFO_FILENAME, SERIAL_FILENAME]
@@ -262,6 +296,17 @@ MANIFEST_SYNTAX_VERSION = 1
 RESUME_MANIFEST_SYNTAX_VERSION = 1
 
 token_lock = threading.RLock()
+
+WINDOWS_PREALLOCATION_FS = ["NTFS", "exFAT", "FAT32"]
+POSIX_PREALLOCATION_FS = [
+    "exfat",
+    "vfat",
+    "ntfs",
+    "btrfs",
+    "ext4",
+    "ocfs2",
+    "xfs",
+]  # May need to exempt NTFS because of reported hangs on remote drives, but should check if that's because of NFS or similar first
 
 
 # request wrapper
@@ -316,7 +361,7 @@ def request(
         requests.URLRequired,
         requests.Timeout,
         requests.ConnectionError,
-        OpenSSL.SSL.Error,
+        requests.exceptions.SSLError,
     ) as e:
         if isinstance(e, requests.HTTPError):
             if (
@@ -348,8 +393,10 @@ def request(
 
 
 # Request Head weapper
-def request_head(session, url, args=None, retries=HTTP_RETRY_COUNT, delay=None):
-    """Performs web head request to url with optional retries, delay,"""
+def request_head(
+    session, url, args=None, retries=HTTP_RETRY_COUNT, delay=None, allow_redirects=True
+):
+    """Performs web head request to url with optional retries, delay,allow_redirects"""
     _retry = False
     if delay is not None:
         time.sleep(delay)
@@ -357,14 +404,16 @@ def request_head(session, url, args=None, retries=HTTP_RETRY_COUNT, delay=None):
     renew_token(session)
 
     try:
-        response = session.head(url, params=args, timeout=HTTP_TIMEOUT)
+        response = session.head(
+            url, params=args, timeout=HTTP_TIMEOUT, allow_redirects=allow_redirects
+        )
         response.raise_for_status()
     except (
         requests.HTTPError,
         requests.URLRequired,
         requests.Timeout,
         requests.ConnectionError,
-        OpenSSL.SSL.Error,
+        requests.exceptions.SSLError,
     ) as e:
         if isinstance(e, requests.HTTPError):
             if (
@@ -406,8 +455,8 @@ def renew_token(session, retries=HTTP_RETRY_COUNT, delay=None):
                     token_response = session.get(
                         GOG_TOKEN_URL,
                         params={
-                            "client_id": "46899977096215655",
-                            "client_secret": "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9",
+                            "client_id": GOG_CLIENT_ID,
+                            "client_secret": GOG_SECRET,
                             "grant_type": "refresh_token",
                             "refresh_token": session.token["refresh_token"],
                         },
@@ -445,6 +494,28 @@ def renew_token(session, retries=HTTP_RETRY_COUNT, delay=None):
 # --------------------------
 # Helper types and functions
 # --------------------------
+
+
+def get_fs_type(path, isWindows=False):
+    path = os.path.realpath(path)  # We need the real location for this
+    partition = {}
+    for part in psutil.disk_partitions(all=True):
+        partition[part.mountpoint] = part.fstype
+    if path in partition:
+        return partition[path]
+    splitpath = path.split(os.sep)
+    for i in range(len(splitpath), 0, -1):
+        if isWindows:
+            path = os.sep.join(splitpath[:i]) + os.sep
+            if path in partition:
+                return partition[path]
+        else:
+            path = os.sep.join(splitpath[:i])
+            if path in partition:
+                return partition[path]
+    return "unknown"
+
+
 class AttrDict(dict):
     def __init__(self, **kw):
         self.update(kw)
@@ -529,7 +600,10 @@ def slugify(value, allow_unicode=False):
     underscores, or hyphens. Convert to lowercase. Also strip leading and
     trailing whitespace, dashes, and underscores.
     """
-    value = str(value)
+    if sys.version_info[0] >= 3:  # Modification
+        value = str(value)
+    else:  # Modification
+        value = unicode(value)  # Modification
     if allow_unicode:
         value = unicodedata.normalize("NFKC", value)
     else:
@@ -554,35 +628,38 @@ def move_with_increment_on_clash(src, dst, count=0):
     if count == 0:
         potDst = dst
     else:
-        root, ext = path_preserving_split_ext(dst)
-        if ext != ".bin":
-            potDst = root + "(" + str(count) + ")" + ext
+        if os.path.isdir(dst):
+            potDst = dst + "(" + str(count) + ")"
         else:
-            # bin file, adjust name to account for gogs weird extension method
-            setDelimiter = root.rfind("-")
-            try:
-                setPart = int(root[setDelimiter + 1 :])
-            except ValueError:
-                # This indicators a false positive. The "-" found was part of the file name not a set delimiter.
-                setDelimiter = -1
-            if setDelimiter == -1:
-                # not part of a bin file set , some other binary file , treat it like a non .bin file
+            root, ext = path_preserving_split_ext(dst)
+            if ext != ".bin":
                 potDst = root + "(" + str(count) + ")" + ext
             else:
-                potDst = (
-                    root[:setDelimiter]
-                    + "("
-                    + str(count)
-                    + ")"
-                    + root[setDelimiter:]
-                    + ext
-                )
+                # bin file, adjust name to account for gogs weird extension method
+                setDelimiter = root.rfind("-")
+                try:
+                    setPart = int(root[setDelimiter + 1 :])
+                except ValueError:
+                    # This indicators a false positive. The "-" found was part of the file name not a set delimiter.
+                    setDelimiter = -1
+                if setDelimiter == -1:
+                    # not part of a bin file set , some other binary file , treat it like a non .bin file
+                    potDst = root + "(" + str(count) + ")" + ext
+                else:
+                    potDst = (
+                        root[:setDelimiter]
+                        + "("
+                        + str(count)
+                        + ")"
+                        + root[setDelimiter:]
+                        + ext
+                    )
         warn(
             'Unresolved destination clash for "{}" detected. Trying "{}"'.format(
                 dst, potDst
             )
         )
-    if not os.path.exists(potDst):
+    if (not os.path.exists(potDst)) or (os.path.isdir(potDst)):
         shutil.move(src, potDst)
     else:
         move_with_increment_on_clash(src, dst, count + 1)
@@ -649,37 +726,38 @@ def save_manifest(
                 item.folder_name = item.title
             all_items_by_title[item.folder_name] = item
 
-        if os.path.isdir("!md5_xmls"):
-            info("Cleaning up " + "!md5_xmls")
-            for cur_dir in sorted(os.listdir("!md5_xmls")):
-                cur_fulldir = os.path.join("!md5_xmls", cur_dir)
+        if os.path.isdir(MD5_DIR_NAME):
+            info("Cleaning up " + MD5_DIR_NAME)
+            for cur_dir in sorted(os.listdir(MD5_DIR_NAME)):
+                cur_fulldir = os.path.join(MD5_DIR_NAME, cur_dir)
                 if os.path.isdir(cur_fulldir):
                     if cur_dir not in all_items_by_title:
                         # ToDo: Maybe try to rename ? Content file names will probably change when renamed (and can't be recognised by md5s as partial downloads) so maybe not wortwhile ?
                         info("Removing outdated directory " + cur_fulldir)
-                        if not dryrun:
-                            shutil.rmtree(cur_fulldir)
+                        shutil.rmtree(cur_fulldir)
                     else:
                         # dir is valid game folder, check its files
                         expected_dirnames = []
                         expected_dirnames.append("downloads")
                         for cur_dir_file in os.listdir(cur_fulldir):
                             if os.path.isdir(
-                                os.path.join("!md5_xmls", cur_dir, cur_dir_file)
+                                os.path.join(MD5_DIR_NAME, cur_dir, cur_dir_file)
                             ):
                                 if cur_dir_file not in expected_dirnames:
                                     info(
                                         "Removing incorrect subdirectory "
                                         + os.path.join(
-                                            "!md5_xmls", cur_dir, cur_dir_file
+                                            MD5_DIR_NAME, cur_dir, cur_dir_file
                                         )
                                     )
                                     shutil.rmtree(
-                                        os.path.join("!md5_xmls", cur_dir, cur_dir_file)
+                                        os.path.join(
+                                            MD5_DIR_NAME, cur_dir, cur_dir_file
+                                        )
                                     )
                                 else:
                                     cur_fulldir2 = os.path.join(
-                                        "!md5_xmls", cur_dir, cur_dir_file
+                                        MD5_DIR_NAME, cur_dir, cur_dir_file
                                     )
                                     os_types = []
                                     for game_item in all_items_by_title[
@@ -719,119 +797,122 @@ def save_manifest(
                                                     for game_item in os_game_items:
                                                         if game_item.lang not in langs:
                                                             langs.append(game_item.lang)
-                                                    for cur_dir_file in os.listdir(
-                                                        cur_fulldir3
+                                                for cur_dir_file in os.listdir(
+                                                    cur_fulldir3
+                                                ):
+                                                    if os.path.isdir(
+                                                        os.path.join(
+                                                            cur_fulldir3, cur_dir_file
+                                                        )
                                                     ):
-                                                        if os.path.isdir(
-                                                            os.path.join(
-                                                                cur_fulldir3,
-                                                                cur_dir_file,
-                                                            )
-                                                        ):
-                                                            if (
-                                                                cur_dir_file
-                                                                not in langs
-                                                            ):
-                                                                info(
-                                                                    "Removing incorrect subdirectory "
-                                                                    + os.path.join(
-                                                                        cur_fulldir3,
-                                                                        cur_dir_file,
-                                                                    )
-                                                                )
-                                                                shutil.rmtree(
-                                                                    os.path.join(
-                                                                        cur_fulldir3,
-                                                                        cur_dir_file,
-                                                                    )
-                                                                )
-                                                            else:
-                                                                cur_fulldir4 = (
-                                                                    os.path.join(
-                                                                        cur_fulldir3,
-                                                                        cur_dir_file,
-                                                                    )
-                                                                )
-                                                                lang_os_game_items = [
-                                                                    x
-                                                                    for x in all_items_by_title[
-                                                                        cur_dir
-                                                                    ].downloads
-                                                                    if x.lang
-                                                                    == cur_dir_file
-                                                                ]
-                                                                for (
-                                                                    cur_dir_file
-                                                                ) in os.listdir(
-                                                                    cur_fulldir4
-                                                                ):
-                                                                    expected_filenames = (
-                                                                        []
-                                                                    )
-                                                                    for (
-                                                                        game_item
-                                                                    ) in lang_os_game_items:
-                                                                        expected_filenames.append(
-                                                                            game_item.name
-                                                                            + ".xml"
-                                                                        )
-                                                                    for (
-                                                                        cur_dir_file
-                                                                    ) in os.listdir(
-                                                                        cur_fulldir4
-                                                                    ):
-                                                                        if os.path.isdir(
-                                                                            os.path.join(
-                                                                                cur_fulldir4,
-                                                                                cur_dir_file,
-                                                                            )
-                                                                        ):
-                                                                            info(
-                                                                                "Removing subdirectory(?!) "
-                                                                                + os.path.join(
-                                                                                    downloadingdir,
-                                                                                    cur_dir,
-                                                                                    cur_dir_file,
-                                                                                )
-                                                                            )
-                                                                            shutil.rmtree(
-                                                                                os.path.join(
-                                                                                    cur_fulldir4,
-                                                                                    cur_dir_file,
-                                                                                )
-                                                                            )  # There shouldn't be subdirectories here ?? Nuke to keep clean.
-                                                                        else:
-                                                                            if (
-                                                                                cur_dir_file
-                                                                                not in expected_filenames
-                                                                            ):
-                                                                                info(
-                                                                                    "Removing outdated file "
-                                                                                    + os.path.join(
-                                                                                        cur_fulldir4,
-                                                                                        cur_dir_file,
-                                                                                    )
-                                                                                )
-                                                                                os.remove(
-                                                                                    os.path.join(
-                                                                                        cur_fulldir4,
-                                                                                        cur_dir_file,
-                                                                                    )
-                                                                                )
-                                                        else:
+                                                        if cur_dir_file not in langs:
                                                             info(
-                                                                "Removing invalid file "
+                                                                "Removing incorrect subdirectory "
                                                                 + os.path.join(
                                                                     cur_fulldir3,
                                                                     cur_dir_file,
                                                                 )
                                                             )
-                                                            os.remove(
+                                                            shutil.rmtree(
                                                                 os.path.join(
                                                                     cur_fulldir3,
                                                                     cur_dir_file,
                                                                 )
                                                             )
+                                                        else:
+                                                            cur_fulldir4 = os.path.join(
+                                                                cur_fulldir3,
+                                                                cur_dir_file,
+                                                            )
+                                                            lang_os_game_items = [
+                                                                x
+                                                                for x in os_game_items
+                                                                if x.lang
+                                                                == cur_dir_file
+                                                            ]
+                                                            expected_filenames = []
+                                                            for (
+                                                                game_item
+                                                            ) in lang_os_game_items:
+                                                                if (
+                                                                    game_item.name
+                                                                    is None
+                                                                ):
+                                                                    warn(
+                                                                        "Game item has OS and Lang but no name in game associated with "
+                                                                        + cur_fulldir4
+                                                                    )
+                                                                if (
+                                                                    game_item.name
+                                                                    is not None
+                                                                ):
+                                                                    expected_filenames.append(
+                                                                        game_item.name
+                                                                        + ".xml"
+                                                                    )
+                                                            for (
+                                                                cur_dir_file
+                                                            ) in os.listdir(
+                                                                cur_fulldir4
+                                                            ):
+
+                                                                for (
+                                                                    cur_dir_file
+                                                                ) in os.listdir(
+                                                                    cur_fulldir4
+                                                                ):
+                                                                    if os.path.isdir(
+                                                                        os.path.join(
+                                                                            cur_fulldir4,
+                                                                            cur_dir_file,
+                                                                        )
+                                                                    ):
+                                                                        info(
+                                                                            "Removing subdirectory(?!) "
+                                                                            + os.path.join(
+                                                                                downloadingdir,
+                                                                                cur_dir,
+                                                                                cur_dir_file,
+                                                                            )
+                                                                        )
+                                                                        shutil.rmtree(
+                                                                            os.path.join(
+                                                                                cur_fulldir4,
+                                                                                cur_dir_file,
+                                                                            )
+                                                                        )  # There shouldn't be subdirectories here ?? Nuke to keep clean.
+                                                                    else:
+                                                                        if (
+                                                                            cur_dir_file
+                                                                            not in expected_filenames
+                                                                        ):
+                                                                            info(
+                                                                                "Removing outdated file "
+                                                                                + os.path.join(
+                                                                                    cur_fulldir4,
+                                                                                    cur_dir_file,
+                                                                                )
+                                                                            )
+                                                                            os.remove(
+                                                                                os.path.join(
+                                                                                    cur_fulldir4,
+                                                                                    cur_dir_file,
+                                                                                )
+                                                                            )
+                                                    else:
+                                                        info(
+                                                            "Removing invalid file "
+                                                            + os.path.join(
+                                                                cur_fulldir3,
+                                                                cur_dir_file,
+                                                            )
+                                                        )
+                                                        os.remove(
+                                                            os.path.join(
+                                                                cur_fulldir3,
+                                                                cur_dir_file,
+                                                            )
+                                                        )
                                         else:
                                             info(
                                                 "Removing invalid file "
@@ -845,22 +926,22 @@ def save_manifest(
                             else:
                                 info(
                                     "Removing invalid file "
-                                    + os.path.join("!md5_xmls", cur_dir, cur_dir_file)
+                                    + os.path.join(MD5_DIR_NAME, cur_dir, cur_dir_file)
                                 )
                                 os.remove(
-                                    os.path.join("!md5_xmls", cur_dir, cur_dir_file)
+                                    os.path.join(MD5_DIR_NAME, cur_dir, cur_dir_file)
                                 )
 
     if update_md5_xml or delete_md5_xml:
-        if not os.path.isdir("!md5_xmls"):
-            os.makedirs("!md5_xmls")
+        if not os.path.isdir(MD5_DIR_NAME):
+            os.makedirs(MD5_DIR_NAME)
         for item in items:
             try:
                 _ = item.folder_name
-            except:
+            except Exception:
                 item.folder_name = item.title
             info("Handling MD5 XML info for " + item.folder_name)
-            fname = os.path.join("!md5_xmls", item.folder_name)
+            fname = os.path.join(MD5_DIR_NAME, item.folder_name)
             if not os.path.isdir(fname):
                 os.makedirs(fname)
             for download in item.downloads:
@@ -869,51 +950,61 @@ def save_manifest(
                 )
                 if not os.path.isdir(ffdir):
                     os.makedirs(ffdir)
-                ffname = os.path.join(ffdir, download.name + ".xml")
-                # rffname = os.path.join(".",ffname)
-                try:
-                    text = download.gog_data.md5_xml.text
-                    # existing_md5s.append(ffname)
-                    if update_md5_xml:
-                        with ConditionalWriter(ffname) as fd_xml:
-                            fd_xml.write(text)
-                    if delete_md5_xml:
-                        del download.gog_data.md5_xml["text"]
-                except AttributeError:
-                    pass
+                if download.name is None:
+                    try:
+                        text = download.gog_data.md5_xml.text
+                        if text is not None and text != "":
+                            warn(
+                                "Download item with MD5 XML Data but without a filename exists in manifest"
+                            )
+                    except AttributeError:
+                        pass
+                if download.name is not None:
+                    ffname = os.path.join(ffdir, download.name + ".xml")
+                    # rffname = os.path.join(".",ffname)
+                    try:
+                        text = download.gog_data.md5_xml.text
+                        # existing_md5s.append(ffname)
+                        if update_md5_xml:
+                            with ConditionalWriter(ffname) as fd_xml:
+                                fd_xml.write(text)
+                        if delete_md5_xml:
+                            del download.gog_data.md5_xml["text"]
+                    except AttributeError:
+                        pass
             # all_md5s = glob.glob()   Can't recursive glob before 3.5 so have to do this the hardway
 
     save_manifest_core(items, filepath)
 
 
+def save_manifest_core_worker(items, filepath, hasManifestPropsItem=False):
+    tmp_path = filepath + TEMP_EXT
+    bak_path = filepath + BACKUP_EXT
+    if os.path.exists(filepath):
+        shutil.copy(filepath, tmp_path)
+    len_adjustment = 0
+    if hasManifestPropsItem:
+        len_adjustment = -1
+    with codecs.open(tmp_path, "w", "utf-8") as w:
+        print("# {} games".format(len(items) + len_adjustment), file=w)
+        pprint.pprint(items, width=123, stream=w)
+    if os.path.exists(bak_path):
+        os.remove(bak_path)
+    if os.path.exists(filepath):
+        shutil.move(filepath, bak_path)
+    shutil.move(tmp_path, filepath)
+
+
 def save_manifest_core(items, filepath=MANIFEST_FILENAME):
     info("saving manifest...")
-    try:
-        with codecs.open(filepath, "w", "utf-8") as w:
-            print("# {} games".format(len(items)), file=w)
-            pprint.pprint(items, width=123, stream=w)
-        info("saved manifest")
-    except KeyboardInterrupt:
-        with codecs.open(filepath, "w", "utf-8") as w:
-            print("# {} games".format(len(items)), file=w)
-            pprint.pprint(items, width=123, stream=w)
-        info("saved manifest")
-        raise
+    save_manifest_core_worker(items, filepath)
+    info("saved manifest")
 
 
 def save_resume_manifest(items):
     info("saving resume manifest...")
-    try:
-        with codecs.open(RESUME_MANIFEST_FILENAME, "w", "utf-8") as w:
-            print("# {} games".format(len(items) - 1), file=w)
-            pprint.pprint(items, width=123, stream=w)
-        info("saved resume manifest")
-    except KeyboardInterrupt:
-        with codecs.open(RESUME_MANIFEST_FILENAME, "w", "utf-8") as w:
-            print("# {} games".format(len(items) - 1), file=w)
-            pprint.pprint(items, width=123, stream=w)
-        info("saved resume manifest")
-        raise
+    save_manifest_core_worker(items, RESUME_MANIFEST_FILENAME, True)
+    info("saved resume manifest")
 
 
 def load_resume_manifest(filepath=RESUME_MANIFEST_FILENAME):
@@ -1218,6 +1309,116 @@ def handle_game_updates(
                             pass
         if candidate != None:
             try:
+                _ = candidate.unreleased
+            except AttributeError:
+                candidate.unreleased = False
+            try:
+                newDownload.prev_verified = candidate.prev_verified
+            except AttributeError:
+                newDownload.prev_verified = False
+            try:
+                newDownload.old_updated = (
+                    candidate.old_updated
+                )  # Propogate until actually updated.
+            except AttributeError:
+                newDownload.old_updated = None
+            try:
+                newDownload.force_change = candidate.force_change
+            except AttributeError:
+                newDownload.force_change = False  # An entry lacking force_change will also lack old_updated so this gets handled later
+
+            oldUpdateTime = None
+            updateTime = None
+            if sys.version_info[0] < 3:  # requires external module
+                if newDownload.old_updated is not None:
+                    oldUpdateTime = dateutil.parser.isoparse(
+                        newDownload.old_updated
+                    )  # requires external module
+                if newDownload.updated is not None:
+                    updateTime = dateutil.parser.isoparse(newDownload.updated)
+            else:  # Standardize #Only valid after 3.7 (this will always be in a datetime isoformat so the changes between 3.7 and 3.11 aren't relevant here)
+                if newDownload.old_updated is not None:
+                    oldUpdateTime = datetime.datetime.fromisoformat(
+                        newDownload.old_updated
+                    )
+                if newDownload.updated is not None:
+                    updateTime = datetime.datetime.fromisoformat(newDownload.updated)
+            newestUpdateTime = None
+            newer = False
+            if updateTime is None:
+                newer = True  # Treating this as definitive because it's probably a result of an item being removed
+            elif oldUpdateTime is None:
+                newestUpdateTime = newDownload.updated
+            elif updateTime > oldUpdateTime:
+                newer = True
+                newestUpdateTime = newDownload.updated
+            else:
+                newestUpdateTime = newDownload.old_updated
+
+            if candidate.name != newDownload.name:
+                info(
+                    '  -> in folder_name "{}" a download has changed name "{}" -> "{}"'.format(
+                        newitem.folder_name, candidate.name, newDownload.name
+                    )
+                )
+                newDownload.old_name = candidate.name
+            if (
+                candidate.md5 != None
+                and candidate.md5 == newDownload.md5
+                and candidate.size == newDownload.size
+            ) or (newDownload.unreleased and candidate.unreleased):
+                # Not released or MD5s match , so whatever the update was it doesn't matter
+                newDownload.old_updated = newestUpdateTime
+                newDownload.updated = newestUpdateTime
+            elif update_downloads_strict:
+                newDownload.updated = (
+                    newestUpdateTime  # Don't forget our *newest* update time.
+                )
+                if newer:
+                    info(
+                        '  -> in folder_name "{}" a download "{}" has probably been updated (update date {} -> {}) and has been marked for change."'.format(
+                            newitem.folder_name,
+                            newDownload.name,
+                            newDownload.old_updated,
+                            newDownload.updated,
+                        )
+                    )
+                    newDownload.force_change = True
+        else:
+            # New file entry, presume changed
+            newDownload.force_change = True
+
+    for newExtra in newitem.extras:
+        candidate = None
+        for oldExtra in olditem.extras:
+            if oldExtra.md5 != None:
+                if oldExtra.md5 == oldExtra.md5 and oldExtra.size == newExtra.size:
+                    if oldExtra.name == newExtra.name:
+                        candidate = oldExtra  # Match already exists
+                        break  # Can't be overriden so end it now
+                    if oldExtra.name != newExtra.name and (
+                        candidate == None or candidate.md5 == None
+                    ):
+                        candidate = oldExtra
+            else:
+                if (
+                    oldExtra.name == newExtra.name
+                    and oldExtra.size == newExtra.size
+                    and candidate == None
+                ):
+                    candidate = AttrDict(**oldExtra.copy())
+                    if strict:
+                        try:
+                            # candidate.force_change = True
+                            candidate.prev_verified = False
+                        except AttributeError:
+                            pass
+        if candidate != None:
+            try:
+                _ = candidate.unreleased
+            except AttributeError:
+                candidate.unreleased = False
+            try:
                 newDownload.prev_verified = candidate.prev_verified
             except AttributeError:
                 newDownload.prev_verified = False
@@ -1300,10 +1501,35 @@ def handle_game_updates(
                 )  # Propogate until actually updated.
             except AttributeError:
                 newExtra.old_updated = None
-            if candidate.md5 != None and candidate.md5 == newExtra.md5:
-                newExtra.old_updated = (
-                    newExtra.updated
-                )  # MD5s match , so whatever the update was it doesn't matter
+
+            oldUpdateTime = None
+            updateTime = None
+            if sys.version_info[0] < 3:  # requires external module
+                if newExtra.old_updated is not None:
+                    oldUpdateTime = dateutil.parser.isoparse(
+                        newExtra.old_updated
+                    )  # requires external module
+                if newExtra.updated is not None:
+                    updateTime = dateutil.parser.isoparse(newExtra.updated)
+            else:  # Standardize #Only valid after 3.7 (this will always be in a datetime isoformat so the changes between 3.7 and 3.11 aren't relevant here)
+                if newExtra.old_updated is not None:
+                    oldUpdateTime = datetime.datetime.fromisoformat(
+                        newExtra.old_updated
+                    )
+                if newExtra.updated is not None:
+                    updateTime = datetime.datetime.fromisoformat(newExtra.updated)
+            newestUpdateTime = None
+            newer = False
+            if updateTime is None:
+                newer = True  # Treating this as definitive because it's probably a result of an item being removed
+            elif oldUpdateTime is None:
+                newestUpdateTime = newExtra.updated
+            elif updateTime > oldUpdateTime:
+                newer = True
+                newestUpdateTime = newExtra.updated
+            else:
+                newestUpdateTime = newExtra.old_updated
+
             if candidate.name != newExtra.name:
                 info(
                     '  -> in folder_name "{}" an extra has changed name "{}" -> "{}"'.format(
@@ -1311,18 +1537,28 @@ def handle_game_updates(
                     )
                 )
                 newExtra.old_name = candidate.name
-            if update_extras_strict and (
-                newExtra.updated == None or (newExtra.old_updated != newExtra.updated)
-            ):  # shouldn't matter if updated is None in this section but preservign the logic for the stand alone function which may be dealing with a partially updated manifest
-                info(
-                    '  -> in folder_name "{}" an extra "{}" has perhaps been updated (update date {} -> {}) and has been marked for change."'.format(
-                        newitem.folder_name,
-                        newExtra.name,
-                        newExtra.old_updated,
-                        newExtra.updated,
-                    )
+            if (
+                candidate.md5 != None
+                and candidate.md5 == newExtra.md5
+                and candidate.size == newExtra.size
+            ) or (newExtra.unreleased and candidate.unreleased):
+                # Not released or MD5s match , so whatever the update was it doesn't matter
+                newExtra.old_updated = newestUpdateTime
+                newExtra.updated = newestUpdateTime
+            elif update_extras_strict:
+                newExtra.updated = (
+                    newestUpdateTime  # Don't forget our *newest* update time.
                 )
-                newExtra.force_change = True
+                if newer:
+                    info(
+                        '  -> in folder_name "{}" an extra "{}" has perhaps been updated (update date {} -> {}) and has been marked for change."'.format(
+                            newitem.folder_name,
+                            newExtra.name,
+                            newExtra.old_updated,
+                            newExtra.updated,
+                        )
+                    )
+                    newExtra.force_change = True
         else:
             # New file entry, presume changed
             newExtra.force_change = True
@@ -1385,15 +1621,19 @@ def fetch_chunk_tree(response, session):
 def fetch_file_info(d, fetch_md5, save_md5_xml, updateSession):
     # fetch file name/size
     # try:
-    response = request(updateSession, d.href, byte_range=(0, 0))
+    response = request_head(updateSession, d.href)
     # except ContentDecodingError as e:
     # info('decoding failed because getting 0 bytes')
     # response = e.response
-    d.name = unquote(urlparse(response.url).path.split("/")[-1])
-    d.size = int(response.headers["Content-Range"].split("/")[-1])
+
     d.gog_data.headers = AttrDict()
+    d.gog_data.original_headers = AttrDict()
     for key in response.headers.keys():
-        d.gog_data.headers[key] = response.headers[key]
+        d.gog_data.original_headers[key] = response.headers[key]
+    for key in d.gog_data.original_headers:
+        d.gog_data.headers[key.lower()] = d.gog_data.original_headers[key]
+    d.name = unquote(urlparse(response.url).path.split("/")[-1])
+    d.size = int(d.gog_data.headers["content-length"])
 
     # fetch file md5
     if fetch_md5:
@@ -1420,14 +1660,12 @@ def fetch_file_info(d, fetch_md5, save_md5_xml, updateSession):
                 #    warn('Unexpected MD5 Chunk Structure, please report to the maintainer')
                 d.md5 = shelf_etree.attrib["md5"]
                 d.raw_updated = shelf_etree.attrib["timestamp"]
-                if sys.version_info[0] < 3 or (
-                    sys.version_info[0] < 4 and sys.version_info[1] < 7
-                ):
+                if sys.version_info[0] < 3:
                     d.updated = (
                         dateutil.parser.isoparse(d.raw_updated)
-                        .replace(tzinfo=datetime.timezone.utc)
+                        .replace(tzinfo=pytz.utc)
                         .isoformat()
-                    )  # Standardize #Only valid after 3.7 or maybe 3.11 ? #Assumes that timezone is UTC (might actually be GMT +2 (Poland) but even if so UTC is a far more consistent approximation than local time for most of the world)
+                    )  # requires external modules
                 else:
                     d.updated = (
                         datetime.datetime.fromisoformat(d.raw_updated)
@@ -1478,16 +1716,14 @@ def fetch_file_info(d, fetch_md5, save_md5_xml, updateSession):
         else:
             d.md5_exempt = True
     if d.updated == None:
-        d.raw_updated = d.gog_data.headers["Last-Modified"]
-        if (sys.version_info[0] == 3 and sys.version_info[1] >= 3) or sys.version_info[
-            0
-        ] >= 4:
-            d.updated = email.utils.parsedate_to_datetime(
-                d.raw_updated
-            ).isoformat()  # Standardize
-        else:
+        d.raw_updated = d.gog_data.headers["last-modified"]
+        if sys.version_info[0] < 3:
             d.updated = datetime.datetime.fromtimestamp(
                 email.utils.mktime_tz(email.utils.parsedate_tz(d.raw_updated)), pytz.utc
+            ).isoformat()  # Standardize
+        else:
+            d.updated = email.utils.parsedate_to_datetime(
+                d.raw_updated
             ).isoformat()  # Standardize
 
 
@@ -1545,6 +1781,7 @@ def filter_downloads(
                                     updated=None,
                                     old_updated=None,
                                     force_change=False,
+                                    old_force_change=None,
                                 )
                                 for key in download:
                                     try:
@@ -1555,7 +1792,7 @@ def filter_downloads(
                                                 % key
                                             )
                                             d.gog_data[key] = download[key]
-                                    except:
+                                    except Exception:
                                         d[key] = download[key]
                                 if d.gog_data.size == "0 MB":  # Not Available
                                     warn(
@@ -1654,6 +1891,8 @@ def filter_extras(out_list, extras_list, save_md5_xml, updateSession):
                     gog_data=AttrDict(),
                     updated=None,
                     old_updated=None,
+                    force_change=False,
+                    old_force_change=None,
                 )
                 for key in extra:
                     try:
@@ -1664,7 +1903,7 @@ def filter_extras(out_list, extras_list, save_md5_xml, updateSession):
                                 % key
                             )
                             d.gog_data[key] = extra[key]
-                    except:
+                    except Exception:
                         d[key] = extra[key]
                 if d.gog_data.size == "0 MB":  # Not Available
                     debug("Unreleased File, Skipping Data Fetching %s" % d.desc)
@@ -1724,6 +1963,37 @@ def filter_dlcs(item, dlc_list, lang_list, os_list, save_md5_xml, updateSession)
             item.bg_urls[potential_title] = dlc_dict["backgroundImage"]
         if dlc_dict["cdKey"] != "":
             item.serials[potential_title] = dlc_dict["cdKey"]
+            if sys.version_info[0] >= 3:
+                if not (
+                    item.serials[potential_title].isprintable()
+                ):  # Probably encoded in UTF-16
+                    pserial = item.serials[potential_title]
+                    if len(pserial) % 2:  # 0dd
+                        pserial = pserial + "\x00"
+                    pserial = bytes(pserial, "UTF-8")
+                    pserial = pserial.decode("UTF-16")
+                    if pserial.isprintable():
+                        item.serials[potential_title] = pserial
+                    else:
+                        warn(
+                            "DLC serial code is unprintable for %s, storing raw",
+                            potential_title,
+                        )
+            else:
+                if not (all(c in string.printable for c in item.serial)):
+                    pserial = item.serials[potential_title]
+                    if len(pserial) % 2:  # 0dd
+                        pserial = pserial + "\x00"
+                    pserial = bytearray(pserial, "UTF-8")
+                    pserial = pserial.decode("UTF-16")
+                    if all(c in string.printable for c in item.serial):
+                        pserial = pserial.encode("UTF-8")
+                        item.serials[potential_title] = pserial
+                    else:
+                        warn(
+                            "DLC serial code is unprintable for %s, storing raw",
+                            potential_title,
+                        )
         filter_downloads(
             item.downloads,
             dlc_dict["downloads"],
@@ -1847,7 +2117,7 @@ def check_skip_file(fname, skipfiles):
 
 def process_path(path):
     fpath = path
-    if sys.version_info[0] <= 2:
+    if sys.version_info[0] < 3:
         if isinstance(fpath, str):
             fpath = fpath.decode("utf-8")
     fpath = os.path.abspath(fpath)
@@ -1880,7 +2150,8 @@ def process_argv(argv):
     sp1.required = True
 
     g1 = sp1.add_parser(
-        "login", help="Login to GOG and save a local copy of your authenticated token"
+        "login",
+        help="Login to GOG ( using a GOG or Galaxy Account only ) and save a local copy of your authenticated token",
     )
     g1.add_argument(
         "username", action="store", help="GOG username/email", nargs="?", default=None
@@ -1926,7 +2197,8 @@ def process_argv(argv):
     g1.add_argument(
         "-md5xmls",
         action="store_true",
-        help="Downloads the MD5 XML files for each item (where available) and outputs them to !md5_xmls",
+        help="Downloads the MD5 XML files for each item (where available) and outputs them to "
+        + MD5_DIR_NAME,
     )
     g1.add_argument(
         "-nochangelogs",
@@ -2011,7 +2283,7 @@ def process_argv(argv):
         action="store",
         help="directory to save downloads to",
         nargs="?",
-        default=".",
+        default=GAME_STORAGE_DIR,
     )
     g1.add_argument(
         "-dryrun",
@@ -2043,6 +2315,299 @@ def process_argv(argv):
         "-skipgames",
         action="store_true",
         help="skip downloading of any GOG game files (deprecated, use -skipgalaxy -skipstandalone -skipshared instead)",
+    )
+    g3 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g3.add_argument(
+        "-ids",
+        action="store",
+        help="id(s) or title(s) of the game in the manifest to download",
+        nargs="*",
+        default=[],
+    )
+    g3.add_argument(
+        "-skipids",
+        action="store",
+        help="id(s) or title(s) of the game(s) in the manifest to NOT download",
+        nargs="*",
+        default=[],
+    )
+    g3.add_argument(
+        "-id",
+        action="store",
+        help="(deprecated) id or title of the game in the manifest to download",
+    )
+    g1.add_argument(
+        "-covers", action="store_true", help="downloads cover images for each game"
+    )
+    g1.add_argument(
+        "-backgrounds",
+        action="store_true",
+        help="downloads background images for each game",
+    )
+    g1.add_argument(
+        "-nocleanimages",
+        action="store_true",
+        help="delete rather than clean old background/cover images for each game",
+    )
+    g1.add_argument(
+        "-skipfiles",
+        action="store",
+        help="file name (or glob patterns) to NOT download",
+        nargs="*",
+        default=[],
+    )
+    g1.add_argument(
+        "-wait",
+        action="store",
+        type=float,
+        help="wait this long in hours before starting",
+        default=0.0,
+    )  # sleep in hr
+    g1.add_argument(
+        "-downloadlimit",
+        action="store",
+        type=float,
+        help="limit downloads to this many MB (approximately)",
+        default=None,
+    )  # sleep in hr
+    g4 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g4.add_argument(
+        "-skipos",
+        action="store",
+        help="skip downloading game files for operating system(s)",
+        nargs="*",
+        default=[],
+    )
+    g4.add_argument(
+        "-os",
+        action=storeExtend,
+        help="download game files only for operating system(s)",
+        nargs="*",
+        default=[],
+    )
+    g5 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g5.add_argument(
+        "-lang",
+        action=storeExtend,
+        help="download game files only for language(s)",
+        nargs="*",
+        default=[],
+    )
+    g5.add_argument(
+        "-skiplang",
+        action=storeExtend,
+        help="skip downloading game files for language(s)",
+        nargs="*",
+        default=[],
+    )
+    g1.add_argument(
+        "-skippreallocation",
+        action="store_true",
+        help="do not preallocate space for files",
+    )
+    g1.add_argument(
+        "-nolog", action="store_true", help="doesn't writes log file gogrepo.log"
+    )
+    g1.add_argument("-debug", action="store_true", help="Includes debug messages")
+
+    g1 = sp1.add_parser(
+        "import", help="Import files with any matching MD5 checksums found in manifest"
+    )
+    g1.add_argument(
+        "src_dir", action="store", help="source directory to import games from"
+    )
+    g1.add_argument(
+        "dest_dir", action="store", help="directory to copy and name imported files to"
+    )
+    g2 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g2.add_argument(
+        "-skipos",
+        action="store",
+        help="skip importing game files for operating system(s)",
+        nargs="*",
+        default=[],
+    )
+    g2.add_argument(
+        "-os",
+        action="store",
+        help="import game files only for operating system(s)",
+        nargs="*",
+        default=[],
+    )
+    g3 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g3.add_argument(
+        "-skiplang",
+        action="store",
+        help="skip importing game files for language(s)",
+        nargs="*",
+        default=[],
+    )
+    g3.add_argument(
+        "-lang",
+        action="store",
+        help="import game files only for language(s)",
+        nargs="*",
+        default=[],
+    )
+    # Code path available but commented out and hardcoded as false due to lack of MD5s on extras.
+    # g4 = g1.add_mutually_exclusive_group()
+    # g4.add_argument('-skipextras', action='store_true', help='skip downloading of any GOG extra files')
+    # g4.add_argument('-skipgames', action='store_true', help='skip downloading of any GOG game files (deprecated, use -skipgalaxy -skipstandalone -skipshared instead)')
+    g1.add_argument(
+        "-nolog", action="store_true", help="doesn't writes log file gogrepo.log"
+    )
+    g1.add_argument("-debug", action="store_true", help="Includes debug messages")
+    g1.add_argument(
+        "-skipgalaxy", action="store_true", help="skip downloading Galaxy installers"
+    )
+    g1.add_argument(
+        "-skipstandalone",
+        action="store_true",
+        help="skip downloading standlone installers",
+    )
+    g1.add_argument(
+        "-skipshared",
+        action="store_true",
+        help="skip downloading installers shared between Galaxy and standalone",
+    )
+    g5 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g5.add_argument(
+        "-ids",
+        action="store",
+        help="id(s) or title(s) of the game in the manifest to import",
+        nargs="*",
+        default=[],
+    )
+    g5.add_argument(
+        "-skipids",
+        action="store",
+        help="id(s) or title(s) of the game(s) in the manifest to NOT import",
+        nargs="*",
+        default=[],
+    )
+
+    g1 = sp1.add_parser(
+        "backup", help="Perform an incremental backup to specified directory"
+    )
+    g1.add_argument(
+        "src_dir", action="store", help="source directory containing gog items"
+    )
+    g1.add_argument(
+        "dest_dir", action="store", help="destination directory to backup files to"
+    )
+    g5 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g5.add_argument(
+        "-ids",
+        action="store",
+        help="id(s) or title(s) of the game in the manifest to backup",
+        nargs="*",
+        default=[],
+    )
+    g5.add_argument(
+        "-skipids",
+        action="store",
+        help="id(s) or title(s) of the game(s) in the manifest to NOT backup",
+        nargs="*",
+        default=[],
+    )
+    g2 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g2.add_argument(
+        "-skipos",
+        action="store",
+        help="skip backup of game files for operating system(s)",
+        nargs="*",
+        default=[],
+    )
+    g2.add_argument(
+        "-os",
+        action="store",
+        help="backup game files only for operating system(s)",
+        nargs="*",
+        default=[],
+    )
+    g3 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g3.add_argument(
+        "-skiplang",
+        action="store",
+        help="skip backup of game files for language(s)",
+        nargs="*",
+        default=[],
+    )
+    g3.add_argument(
+        "-lang",
+        action="store",
+        help="backup game files only for language(s)",
+        nargs="*",
+        default=[],
+    )
+    g4 = g1.add_mutually_exclusive_group()
+    g4.add_argument(
+        "-skipextras", action="store_true", help="skip backup of any GOG extra files"
+    )
+    g4.add_argument(
+        "-skipgames", action="store_true", help="skip backup of any GOG game files"
+    )
+    g1.add_argument(
+        "-skipgalaxy",
+        action="store_true",
+        help="skip backup of any GOG Galaxy installer files",
+    )
+    g1.add_argument(
+        "-skipstandalone",
+        action="store_true",
+        help="skip backup of any GOG standalone installer files",
+    )
+    g1.add_argument(
+        "-skipshared",
+        action="store_true",
+        help="skip backup of any installers included in both the GOG Galalaxy and Standalone sets",
+    )
+    g1.add_argument(
+        "-nolog", action="store_true", help="doesn't writes log file gogrepo.log"
+    )
+    g1.add_argument("-debug", action="store_true", help="Includes debug messages")
+
+    g1 = sp1.add_parser(
+        "verify",
+        help="Scan your downloaded GOG files and verify their size, MD5, and zip integrity",
+    )
+    g1.add_argument(
+        "gamedir",
+        action="store",
+        help="directory containing games to verify",
+        nargs="?",
+        default=GAME_STORAGE_DIR,
+    )
+    g1.add_argument(
+        "-permissivechangeclear",
+        action="store_true",
+        help="clear change marking for files that pass this test (default is to only clear on MD5 match) ",
+    )
+    g1.add_argument(
+        "-forceverify",
+        action="store_true",
+        help="also verify files that are unchanged (by gogrepo) since they were last successfully verified",
+    )
+    g1.add_argument("-skipmd5", action="store_true", help="do not perform MD5 check")
+    g1.add_argument("-skipsize", action="store_true", help="do not perform size check")
+    g1.add_argument(
+        "-skipzip", action="store_true", help="do not perform zip integrity check"
+    )
+    g2 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
+    g2.add_argument(
+        "-delete",
+        action="store_true",
+        help="delete any files which fail integrity test",
+    )
+    g2.add_argument(
+        "-noclean",
+        action="store_true",
+        help="leave any files which fail integrity test in place",
+    )
+    g2.add_argument(
+        "-clean",
+        action="store_true",
+        help="(deprecated) This is now the default behaviour and this option is provided only to maintain backwards compatibility with existings scripts",
     )
     g3 = g1.add_mutually_exclusive_group()  # below are mutually exclusive
     g3.add_argument(
@@ -2470,6 +3035,31 @@ def process_argv(argv):
         "compress",
         help="Compress a directory, typically your recently downloaded games",
     )
+    g1 = sp1.add_parser(
+        "trash",
+        help="Permanently remove orphaned files in your game directory (removes all files unless specific parameters are set)",
+    )
+    g1.add_argument(
+        "gamedir", action="store", help="root directory containing gog games"
+    )
+    g1.add_argument(
+        "-dryrun",
+        action="store_true",
+        help="do not move files, only display what would be trashed",
+    )
+    g1.add_argument(
+        "-installersonly",
+        action="store_true",
+        help="(Deprecated) Currently an alias for -installers",
+    )
+    g1.add_argument(
+        "-installers", action="store_true", help="delete file types used as installers"
+    )
+    g1.add_argument("-images", action="store_true", help="delete !images subfolders")
+    g1.add_argument(
+        "-nolog", action="store_true", help="doesn't writes log file gogrepo.log"
+    )
+    g1.add_argument("-debug", action="store_true", help="Includes debug messages")
 
     g1.add_argument(
         "-compressdir",
@@ -2702,6 +3292,10 @@ def cmd_login(user, passwd):
     }
 
     # prompt for login/password if needed
+    if (login_data["user"] is None) or (login_data["passwd"]) is None:
+        print(
+            "You must use a GOG or GOG Galaxy account, Google/Discord sign-ins are not currently supported."
+        )
     if login_data["user"] is None:
         login_data["user"] = input("Username: ")
     if login_data["passwd"] is None:
@@ -2712,6 +3306,9 @@ def cmd_login(user, passwd):
         "passwd": login_data["passwd"],
         "auth_url": None,
         "login_token": None,
+        "totp_url": None,
+        "totp_token": None,
+        "totp_security_code": None,
         "two_step_url": None,
         "two_step_token": None,
         "two_step_security_code": None,
@@ -2737,10 +3334,10 @@ def cmd_login(user, passwd):
     etree = html5lib.parse(page_response.text, namespaceHTMLElements=False)
     # Bail if we find a request for a reCAPTCHA *in the login form*
     loginForm = etree.find('.//form[@name="login"]')
-    if (not loginForm) or len(
+    if (loginForm is None) or len(
         loginForm.findall('.//div[@class="g-recaptcha form__recaptcha"]')
     ) > 0:
-        if not loginForm:
+        if loginForm is None:
             error(
                 "Could not locate login form on login page to test for reCAPTCHA, please contact the maintainer. In the meantime use a browser (Firefox recommended) to sign in at the below url and then copy & paste the full URL"
             )
@@ -2778,7 +3375,13 @@ def cmd_login(user, passwd):
             },
         )
         etree = html5lib.parse(page_response.text, namespaceHTMLElements=False)
-        if "two_step" in page_response.url:
+        if "totp" in page_response.url:
+            token_data["totp_url"] = page_response.url
+            for elm in etree.findall(".//input"):
+                if elm.attrib["id"] == "two_factor_totp_authentication__token":
+                    token_data["totp_token"] = elm.attrib["value"]
+                    break
+        elif "two_step" in page_response.url:
             token_data["two_step_url"] = page_response.url
             for elm in etree.findall(".//input"):
                 if elm.attrib["id"] == "second_step_authentication__token":
@@ -2790,7 +3393,44 @@ def cmd_login(user, passwd):
             token_data["login_code"] = query_parsed["code"]
 
         # perform two-step if needed
-        if token_data["two_step_url"] is not None:
+        if token_data["totp_url"] is not None:
+            token_data["totp_security_code"] = input(
+                "enter Authenticator security code: "
+            )
+
+            # Send the security code back to GOG
+            page_response = request(
+                loginSession,
+                token_data["totp_url"],
+                data={
+                    "two_factor_totp_authentication[token][letter_1]": token_data[
+                        "totp_security_code"
+                    ][0],
+                    "two_factor_totp_authentication[token][letter_2]": token_data[
+                        "totp_security_code"
+                    ][1],
+                    "two_factor_totp_authentication[token][letter_3]": token_data[
+                        "totp_security_code"
+                    ][2],
+                    "two_factor_totp_authentication[token][letter_4]": token_data[
+                        "totp_security_code"
+                    ][3],
+                    "two_factor_totp_authentication[token][letter_5]": token_data[
+                        "totp_security_code"
+                    ][4],
+                    "two_factor_totp_authentication[token][letter_6]": token_data[
+                        "totp_security_code"
+                    ][5],
+                    "two_factor_totp_authentication[send]": "",
+                    "two_factor_totp_authentication[_token]": token_data["totp_token"],
+                },
+            )
+            if "on_login_success" in page_response.url:
+                parsed = urlparse(page_response.url)
+                query_parsed = parse_qs(parsed.query)
+                token_data["login_code"] = query_parsed["code"]
+
+        elif token_data["two_step_url"] is not None:
             token_data["two_step_security_code"] = input(
                 "enter two-step security code: "
             )
@@ -2827,11 +3467,11 @@ def cmd_login(user, passwd):
             loginSession,
             GOG_TOKEN_URL,
             args={
-                "client_id": "46899977096215655",
-                "client_secret": "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9",
+                "client_id": GOG_CLIENT_ID,
+                "client_secret": GOG_SECRET,
                 "grant_type": "authorization_code",
                 "code": token_data["login_code"],
-                "redirect_uri": "https://embed.gog.com/on_login_success?origin=client",
+                "redirect_uri": GOG_GALAXY_REDIRECT_URL + "?origin=client",
             },
         )
         token_json = token_response.json()
@@ -3082,7 +3722,7 @@ def cmd_update(
                                 % key
                             )
                             item.gog_data[key] = item_json_data[key]
-                    except:
+                    except Exception:
                         item[key] = item_json_data[key]
 
                 if not done:
@@ -3234,6 +3874,29 @@ def cmd_update(
             if urlparse(item.bg_url).path != "":
                 item.bg_urls[item.long_title] = item.bg_url
             item.serial = item_json_data["cdKey"]
+            if sys.version_info[0] >= 3:
+                if not (item.serial.isprintable()):  # Probably encoded in UTF-16
+                    pserial = item.serial
+                    if len(pserial) % 2:  # 0dd
+                        pserial = pserial + "\x00"
+                    pserial = bytes(pserial, "UTF-8")
+                    pserial = pserial.decode("UTF-16")
+                    if pserial.isprintable():
+                        item.serial = pserial
+                    else:
+                        warn("Game serial code is unprintable, storing raw")
+            else:
+                if not all(c in string.printable for c in item.serial):
+                    pserial = item.serial
+                    if len(pserial) % 2:  # 0dd
+                        pserial = pserial + "\x00"
+                    pserial = bytearray(pserial, "UTF-8")
+                    pserial = pserial.decode("UTF-16")
+                    if all(c in string.printable for c in pserial):
+                        pserial = pserial.encode("UTF-8")
+                        item.serial = pserial
+                    else:
+                        warn("Game serial code is unprintable, storing raw")
             item.serials = AttrDict()
             if item.serial != "":
                 item.serials[item.long_title] = item.serial
@@ -3274,9 +3937,9 @@ def cmd_update(
                                         % key
                                     )
                                     item.detailed_gog_data[key] = item_json_data[key]
-                            except:
+                            except Exception:
                                 item.gog_data[key] = item_json_data[key]
-                    except:
+                    except Exception:
                         item[key] = item_json_data[key]
             # parse json data for downloads/extras/dlcs
             filter_downloads(
@@ -3372,7 +4035,7 @@ def cmd_update(
                 global_dupes.extend(dupes)
 
     for dupe in global_dupes:
-        dupe.folder_name = dupe.title + "_" + dupe.id
+        dupe.folder_name = dupe.title + "_" + str(dupe.id)
     # Store stuff in the DB in alphabetical order
     sorted_gamesdb = sorted(gamesdb, key=lambda game: game.title)
     # save the manifest to disk
@@ -3480,11 +4143,11 @@ def cmd_import(
                             md5_info = {}
                         try:
                             items = md5_info[game_item.md5]
-                        except:
+                        except Exception:
                             items = {}
                         try:
                             entry = items[(game.folder_name, game_item.name)]
-                        except:
+                        except Exception:
                             entry = game_item
                         items[(game.folder_name, game_item.name)] = entry
                         md5_info[game_item.md5] = items
@@ -3502,11 +4165,11 @@ def cmd_import(
                             md5_info = {}
                         try:
                             items = md5_info[extra_item.md5]
-                        except:
+                        except Exception:
                             items = {}
                         try:
                             entry = items[(extra_item.folder_name, extra_item.name)]
-                        except:
+                        except Exception:
                             entry = extra_item
                         items[(game.folder_name, extra_item.name)] = entry
                         md5_info[extra_item.md5] = items
@@ -3554,7 +4217,7 @@ def cmd_import(
                         shutil.move(f, dest_file)
                     else:
                         shutil.copy(f, dest_file)
-                    entry = items(folder_name, file_name)
+                    entry = items[(folder_name, file_name)]
                     changed = False
                     try:
                         if entry.force_change == True:
@@ -3596,6 +4259,8 @@ def cmd_download(
     skipfiles,
     covers,
     backgrounds,
+    skippreallocation,
+    clean_old_images,
     downloadLimit=None,
 ):
     sizes, rates, errors = {}, {}, {}
@@ -3676,6 +4341,7 @@ def cmd_download(
 
     downloadingdir = os.path.join(savedir, DOWNLOADING_DIR_NAME)
     provisionaldir = os.path.join(downloadingdir, PROVISIONAL_DIR_NAME)
+    orphandir = os.path.join(savedir, ORPHAN_DIR_NAME)
 
     if os.path.isdir(downloadingdir):
         info("Cleaning up " + downloadingdir)
@@ -3788,10 +4454,9 @@ def cmd_download(
     for item in sorted(items, key=lambda g: g.folder_name):
         info("{%s}" % item.folder_name)
         item_homedir = os.path.join(savedir, item.folder_name)
-        item_downloaddir = os.path.join(savedir, DOWNLOADING_DIR_NAME, item.folder_name)
-        item_provisionaldir = os.path.join(
-            savedir, DOWNLOADING_DIR_NAME, PROVISIONAL_DIR_NAME, item.folder_name
-        )
+        item_downloaddir = os.path.join(downloadingdir, item.folder_name)
+        item_provisionaldir = os.path.join(provisionaldir, item.folder_name)
+        item_orphandir = os.path.join(orphandir, item.folder_name)
         if not dryrun:
             if not os.path.isdir(item_homedir):
                 os.makedirs(item_homedir)
@@ -3986,32 +4651,53 @@ def cmd_download(
                         item.serial = item.serial.replace("</span>", os.linesep)
                         fd_serial.write(item.serial)
 
-        def download_image_from_item_key(item, key, images_dir_name):
+        def download_image_from_item_key(
+            item, key, images_dir_name, image_orphandir, clean_existing
+        ):
             images_key_dir_name = os.path.join(images_dir_name, key)
-            if not os.path.exists(images_key_dir_name):
-                os.makedirs(images_key_dir_name)
             key_local_path = item[key].lstrip("/") + ".jpg"
             key_url = "https://" + key_local_path
             (dir, file) = os.path.split(key_local_path)
             key_local_path_dir = os.path.join(images_key_dir_name, dir)
             key_local_path_file = os.path.join(key_local_path_dir, file)
+            modified_images_key_dir_name = images_key_dir_name
+            if platform.system() == "Windows" and sys.version_info[0] < 3:
+                key_local_path_file = uLongPathPrefix + os.path.abspath(
+                    key_local_path_file
+                )
+                key_local_path_dir = uLongPathPrefix + os.path.abspath(
+                    key_local_path_dir
+                )
+                image_orphandir = uLongPathPrefix + os.path.abspath(image_orphandir)
+                modified_images_key_dir_name = uLongPathPrefix + os.path.abspath(
+                    modified_images_key_dir_name
+                )
             if not os.path.exists(key_local_path_file):
-                if os.path.exists(images_key_dir_name):
+                if os.path.exists(modified_images_key_dir_name):
                     try:
-                        shutil.rmtree(images_key_dir_name)
-                    except:
+                        if clean_existing:
+                            if not os.path.exists(image_orphandir):
+                                os.makedirs(image_orphandir)
+                            move_with_increment_on_clash(
+                                modified_images_key_dir_name, image_orphandir
+                            )
+                        else:
+                            shutil.rmtree(modified_images_key_dir_name)
+                    except Exception as e:
                         error(
-                            "Could not delete potential old image files, aborting update attempt. Please make sure folder and files are writeable and that nothing is accessing the !image folder"
+                            "Could not remove potential old image file, aborting update attempt. Please make sure folder and files are writeable and that nothing is accessing the !image folder"
                         )
                         raise
-                os.makedirs(images_key_dir_name)
-                os.makedirs(key_local_path_dir)
                 response = request(downloadSession, key_url)
+                os.makedirs(key_local_path_dir)
                 with open(key_local_path_file, "wb") as out:
                     out.write(response.content)
 
-        def download_image_from_item_keys(item, keys, images_dir_name):
+        def download_image_from_item_keys(
+            item, keys, images_dir_name, image_orphandir, clean_existing
+        ):
             images_key_dir_name = os.path.join(images_dir_name, keys)
+            images_key_orphandir_name = os.path.join(image_orphandir, keys)
             if not os.path.exists(images_key_dir_name):
                 os.makedirs(images_key_dir_name)
             mkeys = item[keys]
@@ -4027,8 +4713,18 @@ def cmd_download(
                     trailing_partial_key_local_path_dir,
                     trailing_partial_key_local_path_file,
                 ) = os.path.split(partial_key_local_path)
-                if not os.path.exists(leading_partial_key_local_path_dir):
-                    os.makedirs(leading_partial_key_local_path_dir)
+                longpath_safe_leading_partial_key_local_path_dir = (
+                    leading_partial_key_local_path_dir
+                )
+                if platform.system() == "Windows" and sys.version_info[0] < 3:
+                    longpath_safe_leading_partial_key_local_path_dir = (
+                        uLongPathPrefix
+                        + os.path.abspath(
+                            longpath_safe_leading_partial_key_local_path_dir
+                        )
+                    )
+                if not os.path.exists(longpath_safe_leading_partial_key_local_path_dir):
+                    os.makedirs(longpath_safe_leading_partial_key_local_path_dir)
                 full_key_local_path_dir = os.path.join(
                     leading_partial_key_local_path_dir,
                     trailing_partial_key_local_path_dir,
@@ -4037,71 +4733,159 @@ def cmd_download(
                     full_key_local_path_dir, trailing_partial_key_local_path_file
                 )
                 key_url = "https://" + partial_key_local_path
+                if platform.system() == "Windows" and sys.version_info[0] < 3:
+                    full_key_local_path_file = uLongPathPrefix + os.path.abspath(
+                        full_key_local_path_file
+                    )
+                    full_key_local_path_dir = uLongPathPrefix + os.path.abspath(
+                        full_key_local_path_dir
+                    )
                 if not os.path.exists(full_key_local_path_file):
                     if os.path.exists(full_key_local_path_dir):
+                        images_full_key_local_path_orphandir = os.path.join(
+                            images_key_orphandir_name, leading_partial_key_local_path
+                        )
+                        if platform.system() == "Windows" and sys.version_info[0] < 3:
+                            images_full_key_local_path_orphandir = (
+                                uLongPathPrefix
+                                + os.path.abspath(images_full_key_local_path_orphandir)
+                            )
                         try:
-                            shutil.rmtree(full_key_local_path_dir)
-                        except:
+                            if clean_existing:
+                                if not os.path.exists(
+                                    images_full_key_local_path_orphandir
+                                ):
+                                    os.makedirs(images_full_key_local_path_orphandir)
+                                move_with_increment_on_clash(
+                                    full_key_local_path_dir,
+                                    images_full_key_local_path_orphandir,
+                                )
+                            else:
+                                shutil.rmtree(full_key_local_path_dir)
+                        except Exception as e:
                             error(
-                                "Could not delete potential old image files, aborting update attempt. Please make sure folder and files are writeable and that nothing is accessing the !image folder"
+                                "Could not remove potential old image files, aborting update attempt. Please make sure folder and files are writeable and that nothing is accessing the !image folder"
                             )
                             raise
-                    os.makedirs(full_key_local_path_dir)
-                    response = request(downloadSession, key_url)
-                    with open(full_key_local_path_file, "wb") as out:
-                        out.write(response.content)
+                    try:
+                        response = request(downloadSession, key_url)
+                        os.makedirs(full_key_local_path_dir)
+                        with open(full_key_local_path_file, "wb") as out:
+                            out.write(response.content)
+                    except requests.HTTPError:
+                        error(
+                            "Could not download background image "
+                            + full_key_local_path_file
+                        )
             for potential_old_folder in sorted(os.listdir(images_key_dir_name)):
                 if potential_old_folder not in validPaths:
+                    potential_old_folder_path = os.path.join(
+                        images_key_dir_name, potential_old_folder
+                    )
                     try:
-                        shutil.rmtree(
-                            os.path.join(images_key_dir_name, potential_old_folder)
-                        )
-                    except:
+                        if (
+                            platform.system() == "Windows" and sys.version_info[0] < 3
+                        ):  # Work around for rmtree not handling long path names on 2.7 + Windows , can just rm.shutil the full_key_local_path_dir for pure 3+
+                            potential_old_folder_path = (
+                                uLongPathPrefix
+                                + os.path.abspath(potential_old_folder_path)
+                            )
+                            images_key_orphandir_name = (
+                                uLongPathPrefix
+                                + os.path.abspath(images_key_orphandir_name)
+                            )
+                        if clean_existing:
+                            if not os.path.exists(images_key_orphandir_name):
+                                os.makedirs(images_key_orphandir_name)
+                            move_with_increment_on_clash(
+                                potential_old_folder_path, images_key_orphandir_name
+                            )
+                        else:
+                            shutil.rmtree(potential_old_folder_path)
+                    except Exception as e:
                         error(
-                            "Could not delete potential old image files, aborting update attempt. Please make sure folder and files are writeable and that nothing is accessing the !image folder"
+                            "Could not remove potential old image files, aborting update attempt. Please make sure folder and files are writeable and that nothing is accessing the !image folder"
                         )
                         raise
 
         # Download images
         if not dryrun:
             images_dir_name = os.path.join(item_homedir, IMAGES_DIR_NAME)
+            image_orphandir = os.path.join(item_orphandir, IMAGES_DIR_NAME)
+
             if not os.path.exists(images_dir_name):
                 os.makedirs(images_dir_name)
             try:
                 if len(item.bg_urls) != 0 and backgrounds:
                     images_old_bg_url_dir_name = os.path.join(images_dir_name, "bg_url")
+                    modified_image_orphandir = image_orphandir
+                    if (
+                        platform.system() == "Windows" and sys.version_info[0] < 3
+                    ):  # Work around for rmtree not handling long path names on 2.7 + Windows
+                        images_old_bg_url_dir_name = uLongPathPrefix + os.path.abspath(
+                            images_old_bg_url_dir_name
+                        )
+                        modified_image_orphandir = uLongPathPrefix + os.path.abspath(
+                            modified_image_orphandir
+                        )
                     if os.path.exists(images_old_bg_url_dir_name):
                         try:
-                            shutil.rmtree(images_old_bg_url_dir_name)
-                        except:
+                            if clean_existing:
+                                if not os.path.exists(modified_image_orphandir):
+                                    os.makedirs(imodified_image_orphandir)
+                                move_with_increment_on_clash(
+                                    images_old_bg_url_dir_name, modified_image_orphandir
+                                )
+                            else:
+                                shutil.rmtree(images_old_bg_url_dir_name)
+                        except Exception as e:
                             error(
                                 "Could not delete potential old bg_url files, aborting update attempt. Please make sure folder and files are writeable and that nothing is accessing the !image folder"
                             )
+                            raise
                     try:
-                        download_image_from_item_keys(item, "bg_urls", images_dir_name)
+                        download_image_from_item_keys(
+                            item,
+                            "bg_urls",
+                            images_dir_name,
+                            image_orphandir,
+                            clean_old_images,
+                        )
                     except KeyboardInterrupt:
                         warn("Interrupted during download of background image(s)")
                         raise
-                    except:
+                    except Exception:
                         warn("Could not download background image")
 
             except AttributeError:
                 if item.bg_url != "" and backgrounds:
                     try:
-                        download_image_from_item_key(item, "bg_url", images_dir_name)
+                        download_image_from_item_key(
+                            item,
+                            "bg_url",
+                            images_dir_name,
+                            image_orphandir,
+                            clean_old_images,
+                        )
                     except KeyboardInterrupt:
                         warn("Interrupted during download of background image")
                         raise
-                    except:
+                    except Exception:
                         warn("Could not download background image")
 
             if item.image_url != "" and covers:
                 try:
-                    download_image_from_item_key(item, "image_url", images_dir_name)
+                    download_image_from_item_key(
+                        item,
+                        "image_url",
+                        images_dir_name,
+                        image_orphandir,
+                        clean_old_images,
+                    )
                 except KeyboardInterrupt:
                     warn("Interrupted during download of cover image")
                     raise
-                except:
+                except Exception:
                     warn("Could not download cover image")
 
         # updatable_item = all_items_by_id[item.id]
@@ -4261,7 +5045,7 @@ def cmd_download(
             requests.packages.urllib3.exceptions.ProtocolError,
         ) as e:
             error("server response issue while downloading content for %s" % (path))
-        except OpenSSL.SSL.Error as e:
+        except requests.exceptions.SSLError as e:
             error("SSL issue while downloading content for %s" % (path))
         responseTimer.cancel()
         # info("Exiting I/O Loop - " + path)
@@ -4307,52 +5091,61 @@ def cmd_download(
                             with open_notrunc(downloading_path) as f:
                                 f.truncate(sz)
                         if file_sz < sz:  # preallocate extra space
-                            if platform.system() == "Windows":
-                                try:
-                                    info(
-                                        "increasing preallocation to '%d' bytes for '%s' "
-                                        % (sz, downloading_path)
-                                    )
-                                    preH = ctypes.windll.kernel32.CreateFileW(
-                                        compat_downloading_path,
-                                        GENERIC_READ | GENERIC_WRITE,
-                                        0,
-                                        None,
-                                        OPEN_EXISTING,
-                                        0,
-                                        None,
-                                    )
-                                    if preH == -1:
-                                        warn("could not get filehandle")
-                                        raise OSError()
-                                    c_sz = ctypes.wintypes.LARGE_INTEGER(sz)
-                                    ctypes.windll.kernel32.SetFilePointerEx(
-                                        preH, c_sz, None, FILE_BEGIN
-                                    )
-                                    ctypes.windll.kernel32.SetEndOfFile(preH)
-                                    ctypes.windll.kernel32.CloseHandle(preH)
-                                except Exception:
-                                    warn("preallocation failed")
-                                    warn("The handled exception was:")
-                                    log_exception("")
-                                    warn("End exception report.")
-                                    if preH != -1:
-                                        info("failed - closing outstanding handle")
-                                        ctypes.windll.kernel32.CloseHandle(preH)
-                            else:
-                                if sys.version_info[0] >= 4 or (
-                                    sys.version_info[0] == 3
-                                    and sys.version_info[1] >= 3
-                                ):
-                                    info(
-                                        "increasing preallocation to '%d' bytes for '%s' using posix_fallocate "
-                                        % (sz, downloading_path)
-                                    )
-                                    with open(downloading_path, "r+b") as f:
+                            if not skippreallocation:
+                                if platform.system() == "Darwin":
+                                    # MacOS doesn't support posix.fallocate
+                                    pass
+                                elif platform.system() == "Windows":
+                                    fs = get_fs_type(compat_downloading_path, True)
+                                    if fs in WINDOWS_PREALLOCATION_FS:
                                         try:
-                                            os.posix_fallocate(f.fileno(), 0, sz)
+                                            info(
+                                                "increasing preallocation to '%d' bytes for '%s' "
+                                                % (sz, downloading_path)
+                                            )
+                                            preH = ctypes.windll.kernel32.CreateFileW(
+                                                compat_downloading_path,
+                                                GENERIC_READ | GENERIC_WRITE,
+                                                0,
+                                                None,
+                                                OPEN_EXISTING,
+                                                0,
+                                                None,
+                                            )
+                                            if preH == -1:
+                                                warn("could not get filehandle")
+                                                raise OSError()
+                                            c_sz = ctypes.wintypes.LARGE_INTEGER(sz)
+                                            ctypes.windll.kernel32.SetFilePointerEx(
+                                                preH, c_sz, None, FILE_BEGIN
+                                            )
+                                            ctypes.windll.kernel32.SetEndOfFile(preH)
+                                            ctypes.windll.kernel32.CloseHandle(preH)
                                         except Exception:
-                                            warn("posix preallocation failed")
+                                            warn("preallocation failed")
+                                            warn("The handled exception was:")
+                                            log_exception("")
+                                            warn("End exception report.")
+                                            if preH != -1:
+                                                info(
+                                                    "failed - closing outstanding handle"
+                                                )
+                                                ctypes.windll.kernel32.CloseHandle(preH)
+                                else:
+                                    fs = get_fs_type(downloading_path)
+                                    if fs.lower() in POSIX_PREALLOCATION_FS:
+                                        if sys.version_info[0] >= 3:
+                                            info(
+                                                "increasing preallocation to '%d' bytes for '%s' using posix_fallocate "
+                                                % (sz, downloading_path)
+                                            )
+                                            with open(downloading_path, "r+b") as f:
+                                                try:
+                                                    os.posix_fallocate(
+                                                        f.fileno(), 0, sz
+                                                    )
+                                                except Exception:
+                                                    warn("posix preallocation failed")
                     else:
                         if os.path.exists(downloading_path):
                             file_sz = os.path.getsize(downloading_path)
@@ -4362,107 +5155,131 @@ def cmd_download(
                                 with open_notrunc(downloading_path) as f:
                                     f.truncate(sz)
                             if file_sz < sz:  # preallocate extra space
-                                if platform.system() == "Windows":
-                                    try:
-                                        preH = -1
-                                        info(
-                                            "increasing preallocation to '%d' bytes for '%s' "
-                                            % (sz, downloading_path)
-                                        )
-                                        preH = ctypes.windll.kernel32.CreateFileW(
-                                            compat_downloading_path,
-                                            GENERIC_READ | GENERIC_WRITE,
-                                            0,
-                                            None,
-                                            OPEN_EXISTING,
-                                            0,
-                                            None,
-                                        )
-                                        if preH == -1:
-                                            warn("could not get filehandle")
-                                            raise OSError()
-                                        c_sz = ctypes.wintypes.LARGE_INTEGER(sz)
-                                        ctypes.windll.kernel32.SetFilePointerEx(
-                                            preH, c_sz, None, FILE_BEGIN
-                                        )
-                                        ctypes.windll.kernel32.SetEndOfFile(preH)
-                                        ctypes.windll.kernel32.CloseHandle(preH)
-                                    except Exception:
-                                        warn("preallocation failed")
-                                        warn("The handled exception was:")
-                                        log_exception("")
-                                        warn("End exception report.")
-                                        if preH != -1:
-                                            info("failed - closing outstanding handle")
-                                            ctypes.windll.kernel32.CloseHandle(preH)
-                                else:
-                                    if sys.version_info[0] >= 4 or (
-                                        sys.version_info[0] == 3
-                                        and sys.version_info[1] >= 3
-                                    ):
-                                        info(
-                                            "increasing preallocation to '%d' bytes for '%s' using posix_fallocate "
-                                            % (sz, downloading_path)
-                                        )
-                                        with open(downloading_path, "r+b") as f:
+                                if not skippreallocation:
+                                    if platform.system() == "Darwin":
+                                        # MacOS doesn't support posix.fallocate
+                                        pass
+                                    elif platform.system() == "Windows":
+                                        fs = get_fs_type(downloading_path, True)
+                                        if fs in WINDOWS_PREALLOCATION_FS:
                                             try:
-                                                os.posix_fallocate(f.fileno(), 0, sz)
+                                                preH = -1
+                                                info(
+                                                    "increasing preallocation to '%d' bytes for '%s' "
+                                                    % (sz, downloading_path)
+                                                )
+                                                preH = (
+                                                    ctypes.windll.kernel32.CreateFileW(
+                                                        compat_downloading_path,
+                                                        GENERIC_READ | GENERIC_WRITE,
+                                                        0,
+                                                        None,
+                                                        OPEN_EXISTING,
+                                                        0,
+                                                        None,
+                                                    )
+                                                )
+                                                if preH == -1:
+                                                    warn("could not get filehandle")
+                                                    raise OSError()
+                                                c_sz = ctypes.wintypes.LARGE_INTEGER(sz)
+                                                ctypes.windll.kernel32.SetFilePointerEx(
+                                                    preH, c_sz, None, FILE_BEGIN
+                                                )
+                                                ctypes.windll.kernel32.SetEndOfFile(
+                                                    preH
+                                                )
+                                                ctypes.windll.kernel32.CloseHandle(preH)
                                             except Exception:
-                                                warn("posix preallocation failed")
+                                                warn("preallocation failed")
+                                                warn("The handled exception was:")
+                                                log_exception("")
+                                                warn("End exception report.")
+                                                if preH != -1:
+                                                    info(
+                                                        "failed - closing outstanding handle"
+                                                    )
+                                                    ctypes.windll.kernel32.CloseHandle(
+                                                        preH
+                                                    )
+                                    else:
+                                        fs = get_fs_type(downloading_path)
+                                        if fs.lower() in POSIX_PREALLOCATION_FS:
+                                            if sys.version_info[0] >= 3:
+                                                info(
+                                                    "increasing preallocation to '%d' bytes for '%s' using posix_fallocate "
+                                                    % (sz, downloading_path)
+                                                )
+                                                with open(downloading_path, "r+b") as f:
+                                                    try:
+                                                        os.posix_fallocate(
+                                                            f.fileno(), 0, sz
+                                                        )
+                                                    except Exception:
+                                                        warn(
+                                                            "posix preallocation failed"
+                                                        )
                         else:
-                            if platform.system() == "Windows":
-                                try:
-                                    preH = -1
-                                    info(
-                                        "preallocating '%d' bytes for '%s' "
-                                        % (sz, downloading_path)
-                                    )
-                                    preH = ctypes.windll.kernel32.CreateFileW(
-                                        compat_downloading_path,
-                                        GENERIC_READ | GENERIC_WRITE,
-                                        0,
-                                        None,
-                                        CREATE_NEW,
-                                        0,
-                                        None,
-                                    )
-                                    if preH == -1:
-                                        warn("could not get filehandle")
-                                        raise OSError()
-                                    c_sz = ctypes.wintypes.LARGE_INTEGER(sz)
-                                    ctypes.windll.kernel32.SetFilePointerEx(
-                                        preH, c_sz, None, FILE_BEGIN
-                                    )
-                                    ctypes.windll.kernel32.SetEndOfFile(preH)
-                                    ctypes.windll.kernel32.CloseHandle(preH)
-                                    # DEVNULL = open(os.devnull, 'wb')
-                                    # subprocess.call(["fsutil","file","createnew",path,str(sz)],stdout=DEVNULL,stderr=DEVNULL)
-                                except Exception:
-                                    warn("preallocation failed")
-                                    warn("The handled exception was:")
-                                    log_exception("")
-                                    warn("End exception report.")
-                                    if preH != -1:
-                                        info("failed - closing outstanding handle")
-                                        ctypes.windll.kernel32.CloseHandle(preH)
-                            else:
-                                if sys.version_info[0] >= 4 or (
-                                    sys.version_info[0] == 3
-                                    and sys.version_info[1] >= 3
-                                ):
-                                    info(
-                                        "attempting preallocating '%d' bytes for '%s' using posix_fallocate "
-                                        % (sz, downloading_path)
-                                    )
-                                    with open(downloading_path, "wb") as f:
+                            if not skippreallocation:
+                                if platform.system() == "Darwin":
+                                    # MacOS doesn't support posix.fallocate
+                                    pass
+                                elif platform.system() == "Windows":
+                                    fs = get_fs_type(downloading_path, True)
+                                    if fs in WINDOWS_PREALLOCATION_FS:
                                         try:
-                                            os.posix_fallocate(f.fileno(), 0, sz)
+                                            preH = -1
+                                            info(
+                                                "preallocating '%d' bytes for '%s' "
+                                                % (sz, downloading_path)
+                                            )
+                                            preH = ctypes.windll.kernel32.CreateFileW(
+                                                compat_downloading_path,
+                                                GENERIC_READ | GENERIC_WRITE,
+                                                0,
+                                                None,
+                                                CREATE_NEW,
+                                                0,
+                                                None,
+                                            )
+                                            if preH == -1:
+                                                warn("could not get filehandle")
+                                                raise OSError()
+                                            c_sz = ctypes.wintypes.LARGE_INTEGER(sz)
+                                            ctypes.windll.kernel32.SetFilePointerEx(
+                                                preH, c_sz, None, FILE_BEGIN
+                                            )
+                                            ctypes.windll.kernel32.SetEndOfFile(preH)
+                                            ctypes.windll.kernel32.CloseHandle(preH)
+                                            # DEVNULL = open(os.devnull, 'wb')
+                                            # subprocess.call(["fsutil","file","createnew",path,str(sz)],stdout=DEVNULL,stderr=DEVNULL)
                                         except Exception:
-                                            warn("posix preallocation failed")
+                                            warn("preallocation failed")
+                                            warn("The handled exception was:")
+                                            log_exception("")
+                                            warn("End exception report.")
+                                            if preH != -1:
+                                                info(
+                                                    "failed - closing outstanding handle"
+                                                )
+                                                ctypes.windll.kernel32.CloseHandle(preH)
+                                else:
+                                    fs = get_fs_type(downloading_path)
+                                    if fs.lower() in POSIX_PREALLOCATION_FS:
+                                        if sys.version_info[0] >= 3:
+                                            info(
+                                                "attempting preallocating '%d' bytes for '%s' using posix_fallocate "
+                                                % (sz, downloading_path)
+                                            )
+                                            with open(downloading_path, "wb") as f:
+                                                try:
+                                                    os.posix_fallocate(
+                                                        f.fileno(), 0, sz
+                                                    )
+                                                except Exception:
+                                                    warn("posix preallocation failed")
                 succeed = False
-                response = request(
-                    downloadSession, href, byte_range=(0, 0), stream=False
-                )
+                response = request_head(downloadSession, href)
                 chunk_tree = fetch_chunk_tree(response, downloadSession)
                 if chunk_tree is not None:
                     name = chunk_tree.attrib["name"]
@@ -4783,7 +5600,10 @@ def cmd_download(
         (path, provisional_path, writable_game_item, work_writable_items) = (
             work_provisional.get()
         )
-        info("moving completed download '%s' to '%s'  " % (provisional_path, path))
+        info(
+            "moving provisionally completed download '%s' to '%s'  "
+            % (provisional_path, path)
+        )
         shutil.move(provisional_path, path)
         if writable_game_item != None:
             try:
@@ -4847,7 +5667,7 @@ def cmd_backup(
 ):
     gamesdb = load_manifest()
 
-    for game in games_db:
+    for game in gamesdb:
         try:
             _ = game.folder_name
         except AttributeError:
@@ -5139,6 +5959,14 @@ def cmd_verify(
                 itm.prev_verified = False
                 game_changed = True
 
+            try:
+                _ = itm.unreleased
+            except AttributeError:
+                itm.unreleased = False
+
+            if itm.unreleased:
+                continue
+
             if itm.name is None:
                 warn('no known filename for "%s (%s)"' % (game.title, itm.desc))
                 continue
@@ -5178,10 +6006,18 @@ def cmd_verify(
                 if (
                     not fail and check_zips and itm.name.lower().endswith(".zip")
                 ):  # Doesn't matter if it's a valid zip if size / MD5 are wrong, it's not the right zip
-                    if not test_zipfile(itm_file):
-                        info("zip test failed for %s" % itm_dirpath)
-                        bad_zip_cnt += 1
-                        fail = True
+                    try:
+                        if not test_zipfile(itm_file):
+                            info("zip test failed for " % itm_dirpath)
+                            bad_zip_cnt += 1
+                            fail = True
+                    except (
+                        NotImplementedError
+                    ):  # Temp work around until implement support
+                        warn(
+                            "Unsupported file compression method, falling back to name/size check for %s"
+                            % itm_dirpath
+                        )
                 if delete_on_fail and fail:
                     info("deleting %s" % itm_dirpath)
                     os.remove(itm_file)
@@ -5199,10 +6035,12 @@ def cmd_verify(
                 try:
                     old_force_change = itm.force_change
                 except AttributeError:
-                    old_force_change = None
+                    itm.force_change = False
+                    old_force_change = False
                 try:
                     old_last_updated = itm.old_updated
                 except AttributeError:
+                    itm.old_updated = None
                     old_last_updated = None
                 if not fail:
                     itm.prev_verified = True
@@ -5210,7 +6048,7 @@ def cmd_verify(
                         itm.force_change = False  # Verified as correct by MD5 match
                         itm.old_updated = itm.updated
                     if permissive_change_clear:
-                        itm.force_change = False  # Flag has been set to except matching name / size and passing the zip test as the correct file
+                        itm.force_change = False  # Flag has been set to accept matching name / size and passing the zip test as the correct file
                         itm.old_updated = itm.updated
                 else:
                     itm.prev_verified = False
@@ -5257,19 +6095,12 @@ def cmd_verify(
         info("cleaned items....... %d" % clean_file_cnt)
 
 
-def cmd_trash(cleandir, installersonly, dryrun):
+def cmd_trash(cleandir, installers, images, dryrun):
     downloading_root_dir = os.path.join(cleandir, ORPHAN_DIR_NAME)
     for dir in os.listdir(downloading_root_dir):
         testdir = os.path.join(downloading_root_dir, dir)
         if os.path.isdir(testdir):
-            if not installersonly:
-                try:
-                    if not dryrun:
-                        shutil.rmtree(testdir)
-                    info("Deleting " + testdir)
-                except Exception:
-                    error("Failed to delete directory: " + testdir)
-            else:
+            if installers:
                 contents = os.listdir(testdir)
                 deletecontents = [
                     x
@@ -5284,10 +6115,24 @@ def cmd_trash(cleandir, installersonly, dryrun):
                     if not dryrun:
                         os.remove(contentpath)
                     info("Deleting " + contentpath)
+            if images:
+                images_folder = os.path.join(testdir, IMAGES_DIR_NAME)
+                if os.path.isdir(images_folder):
+                    if not dryrun:
+                        shutil.rmtree(images_folder)
+                    info("Deleting " + images_folder)
+            if not (installers or images):
+                try:
+                    if not dryrun:
+                        shutil.rmtree(testdir)
+                    info("Deleting " + testdir)
+                except Exception:
+                    error("Failed to delete directory: " + testdir)
+            else:
                 try:
                     if not dryrun:
                         os.rmdir(testdir)
-                        info("Removed empty directory " + testdir)
+                    info("Removed empty directory " + testdir)
                 except OSError:
                     pass
 
@@ -5913,12 +6758,48 @@ def main(args):
             args.skipfiles,
             args.covers,
             args.backgrounds,
+            args.skippreallocation,
+            not args.nocleanimages,
             args.downloadlimit,
         )
     elif args.command == "import":
-        # Hardcode these as false since extras currently do not have MD5s as such skipgames would give nothing and skipextras would change nothing. The logic path and arguments are present in case this changes, though commented out in the case of arguments)
         args.skipgames = False
         args.skipextras = False
+        if not args.os:
+            if args.skipos:
+                args.os = [x for x in VALID_OS_TYPES if x not in args.skipos]
+            else:
+                args.os = VALID_OS_TYPES
+        if not args.lang:
+            if args.skiplang:
+                args.lang = [x for x in VALID_LANG_TYPES if x not in args.skiplang]
+            else:
+                args.lang = VALID_LANG_TYPES
+        if args.skipgames:
+            args.skipstandalone = True
+            args.skipgalaxy = True
+            args.skipshared = True
+        cmd_import(
+            args.src_dir,
+            args.dest_dir,
+            args.os,
+            args.lang,
+            args.skipextras,
+            args.skipids,
+            args.ids,
+            args.skipgalaxy,
+            args.skipstandalone,
+            args.skipshared,
+            False,
+        )
+    elif args.command == "verify":
+        # Hardcode these as false since extras currently do not have MD5s as such skipgames would give nothing and skipextras would change nothing. The logic path and arguments are present in case this changes, though commented out in the case of arguments)
+        if args.clean:
+            warn(
+                "The -clean option is deprecated, as the default behaviour has been changed to clean files that fail the verification checks. -noclean now exists for leaving files in place. Please update your scripts accordingly. "
+            )
+        if args.id:
+            args.ids = [args.id]
         if not args.os:
             if args.skipos:
                 args.os = [x for x in VALID_OS_TYPES if x not in args.skipos]
@@ -5974,7 +6855,7 @@ def main(args):
             check_filesize,
             check_zips,
             args.delete,
-            args.clean,
+            not args.noclean,
             args.ids,
             args.os,
             args.lang,
@@ -6017,7 +6898,9 @@ def main(args):
     elif args.command == "clean":
         cmd_clean(args.cleandir, args.dryrun)
     elif args.command == "trash":
-        cmd_trash(args.gamedir, args.installersonly, args.dryrun)
+        if args.installersonly:
+            args.installers = True
+        cmd_trash(args.gamedir, args.installers, args.images, args.dryrun)
     elif args.command == "gui":
         if not args.os:
             if args.skipos:
@@ -6143,7 +7026,8 @@ class Wakelock:
             "PyQt5.QtDBus" in sys.modules
         ):
             self.inhibitor = self._get_inhibitor()
-            self.inhibitor.inhibit()
+            if self.inhibitor != None:
+                self.inhibitor.inhibit()
 
     def release_wakelock(self):
         if platform.system() == "Windows":
