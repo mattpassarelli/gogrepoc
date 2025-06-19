@@ -230,7 +230,7 @@ Allows for easily setting a specified download directory.
 
 Compression Script
 ------------
-A simple Python based compression script is included in `compress.py`. Requires 7-Zip (or a fork of it like Nanazip) to be installed on your machine. 
+A simple Python based compression function is built into the main `gogrepoc.py` file. Run using `gogrepoc.py compress -compressdir $PATH`. Requires 7-Zip (or a fork of it like Nanazip) to be installed on your machine. 
 
 Useful for systems storing games on a NAS, where storage space can be a premium. Or for systems like GameVault where the library requires a specific format.
 
