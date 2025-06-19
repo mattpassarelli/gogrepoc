@@ -205,9 +205,18 @@ new GOG folder with clean game directory names and file names as GOG has them na
     -dryrun     	do not move files, only display what would be trashed
 	-installersonly only delete file types used as installers
 
+--
+
 ``gogrepoc.py gui`` Starts the GUI interface. 
 
-    None
+    gui
+--
+
+``gogrepoc.py compress`` Compresses a dircetory into a highly compressed 7z file. Useful for cold storage, archiving of games, or systems like GameVault.
+
+    compress [-compressdir <path>]
+    -compressdir <path>  directory to compress, default is current directory
+
 --
 
 Other arguments:
