@@ -1726,6 +1726,12 @@ def process_argv(argv):
         help="Compress a directory, typically your recently downloaded games",
     )
 
+    g1.add_argument(
+            "-compressdir",
+            action="store",
+            help="The source directory to compress",
+        )
+    
     g1 = sp1.add_parser('trash', help='Permanently remove orphaned files in your game directory (removes all files unless specific parameters are set)')
     g1.add_argument('gamedir', action='store', help='root directory containing gog games')
     g1.add_argument('-dryrun', action='store_true', help='do not move files, only display what would be trashed')
@@ -1735,12 +1741,6 @@ def process_argv(argv):
     g1.add_argument('-nolog', action='store_true', help = 'doesn\'t writes log file gogrepo.log')
     g1.add_argument('-debug', action='store_true', help = "Includes debug messages")
     
-    g1.add_argument(
-        "-compressdir",
-        action="store",
-        help="The source directory to compress",
-    )
-
     g1 = p1.add_argument_group('other')
     g1.add_argument('-h', '--help', action='help', help='show help message and exit')
     g1.add_argument('-v', '--version', action='version', help='show version number and exit',
@@ -2549,7 +2549,7 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
     if skipfiles:
         formattedSkipFiles = "'" + "', '".join(skipfiles) + "'"
         info("skipping files that match: {%s}" % formattedSkipFiles)
-        
+    
     if not items:
         if ids and skipids:
             error('no game(s) with id(s) in "{}" was found'.format(ids) + 'after skipping game(s) with id(s) in "{}".'.format(skipids))        
@@ -2685,8 +2685,6 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
             
         if skipshared:
             filtered_sharedDownloads = []      
-                    
-            
         downloadsOS = [game_item for game_item in filtered_downloads if game_item.os_type in os_list]
         filtered_downloads= downloadsOS
         #print(item.downloads)
@@ -4013,6 +4011,15 @@ def download_games_gui(selected_games, args, download_path):
             no_titlebar=True,
         )
 
+        if getattr(args, "skipids", None) is None:
+            args.skipids = []
+        if not getattr(args,"dryrun", False):
+            args.dryrun = False
+        if getattr(args, "skippreallocation", None) is None:
+            args.skippreallocation = False
+        if getattr(args, "clean_old_images", None) is None:
+            args.clean_old_images = False
+
         cmd_download(
             download_path,
             args.skipextras,
@@ -4027,6 +4034,8 @@ def download_games_gui(selected_games, args, download_path):
             args.skipfiles,
             args.covers,
             args.backgrounds,
+            args.skippreallocation,
+            args.clean_old_images,
             args.downloadlimit,
         )
 
@@ -4455,10 +4464,15 @@ def main(args):
             else:
                 args.lang = VALID_LANG_TYPES
         if getattr(args, "skipgames", None) is None:
-            args.skipstandalone = True
+            args.skipstandalone = False
             args.skipgalaxy = True
             args.skipshared = True
             args.skipextras = True
+            args.skipfiles = []
+            args.covers = False
+            args.backgrounds = False
+            args.downloadlimit = None
+
         cmd_gui(args)
         return
     elif args.command == "compress":
