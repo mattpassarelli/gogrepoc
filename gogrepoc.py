@@ -10,6 +10,7 @@ __version__ = "0.4.0-a"
 __url__ = "https://github.com/kalanyr/gogrepoc"
 
 # imports
+import subprocess
 import unicodedata
 import os
 import sys
@@ -2464,6 +2465,18 @@ def process_argv(argv):
     g1.add_argument("-debug", action="store_true", help="Includes debug messages")
 
     g1 = sp1.add_parser("gui", help="Launch the tool using the GUI")
+
+    g1 = sp1.add_parser(
+        "compress",
+        help="Compress a directory, typically your recently downloaded games",
+    )
+
+    g1.add_argument(
+        "-compressdir",
+        action="store",
+        help="The source directory to compress",
+    )
+
     g1.add_argument(
         "-nolog", action="store_true", help="doesn't writes log file gogrepo.log"
     )
@@ -5466,11 +5479,14 @@ def get_theme():
 
 
 def get_game_list():
+    """
+    Generate a list of all games available in the manifest
+    TODO: sort by date obtained so it's easier to see newly added games
+    """
     print("getting list")
     all_games = load_manifest()
     game_list = []
     for game in all_games:
-        print(game.title)
         game_list.append(game.title)
 
     return sorted(game_list)
@@ -5686,6 +5702,66 @@ def cmd_gui(args):
             )
 
     window.close()
+
+
+def compress_folders(source_directory):
+    """
+    Compresses all folders in the given source directory into 7z archives compatible with GameVault.
+    Folders starting with '!' are skipped.
+    Deletes the folder after successful compression.
+    Is designed to compress as much as possible, results in high CPU usage.
+    """
+    # Change to the source directory
+    os.chdir(source_directory)
+
+    # Loop over each item in the directory
+    for folder in os.listdir(source_directory):
+        folder_path = os.path.join(source_directory, folder)
+
+        # if folder starts with !, then we skip it
+        # presumed !orphan or !downloading folders
+        if folder.startswith("!"):
+            print(f"Skipping folder: {folder}")
+            continue
+
+        # Check if it's a directory
+        if os.path.isdir(folder_path):
+            # Define the output archive name
+            archive_name = f"{folder}.7z"
+
+            # Command to compress the folder using 7zip with the given flags
+            command = [
+                "7z",
+                "a",
+                "-mx=9",
+                "-mfb=64",
+                "-md=32m",
+                "-ms=on",
+                archive_name,
+                folder_path,
+            ]
+
+            try:
+                # Run the command
+                subprocess.run(command, check=True)
+                print(f"Compressed {folder} into {archive_name}")
+
+                # Delete the folder after successful compression
+                shutil.rmtree(folder_path)
+                print(f"Deleted folder: {folder}")
+            except subprocess.CalledProcessError as e:
+                print(f"Failed to compress {folder}: {e}")
+            except Exception as e:
+                print(f"Failed to delete folder {folder}: {e}")
+
+
+def cmd_compress(args):
+    compress_dir = args.compressdir
+    if not os.path.isdir(compress_dir):
+        error(f"Error: '{compress_dir}' is not a valid directory.")
+        return
+
+    compress_folders(compress_dir)
 
 
 def update_self():
@@ -5959,6 +6035,11 @@ def main(args):
             args.skipshared = True
         cmd_gui(args)
         return
+    elif args.command == "compress":
+        if not args.compressdir:
+            # you must specify a directory to compress
+            error("You must specify a directory to compress")
+        cmd_compress(args)
 
     etime = datetime.datetime.now()
     info("--")
