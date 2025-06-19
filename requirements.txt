@@ -8,9 +8,9 @@ idna==3.10
 psutil==7.0.0
 pyasn1==0.6.1
 pycparser==2.22
-pyobjc==11.1
 pyOpenSSL==24.2.1
---extra-index-url https://PySimpleGUI.net/install
+# TODO: replace PySimpleGUI with a community fork due to EOL
+--extra-index-url https://PySimpleGUI.net/install 
 PySimpleGUI==5.0.7
 requests==2.32.3
 rsa==4.9

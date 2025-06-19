@@ -236,6 +236,50 @@ Makes grabbing specific games acquired over time easier, as you do not have to s
 
 Allows for easily setting a specified download directory.
 
+Due to PySimpleGUI's requirements, the use of the GUI is only available on Python 3.
+
+## GUI OS Specific Instructions
+
+### Linux/Ubuntu
+------------
+Ubuntu does not support Python Virtual Environments (venv) out of the box. You will need to install the `python3-venv` package first.
+
+```bash
+sudo apt update
+sudo apt install python3-venv
+```
+
+Then you can create a virtual environment and install the required packages.
+
+The default instances of Python on Linux also do not include tkinter like they do on Windows. You'll need to install the `python3-tk` package.
+
+```bash
+sudo apt install python3-tk
+```
+
+### MacOS
+------------
+Tested on the latest MacOS 15.5. The default Python installation can be problematic, so I recommend using Homebrew to install Python 3.11. Specifically, <=3.11. Anything later has issues as noted [here](https://github.com/orgs/Homebrew/discussions/5809#discussioncomment-11638857).
+
+```bash
+brew install python@3.11
+```
+
+Then you can create a virtual environment and install the required packages.
+
+MacOS also specfically requires the `pyobjc` package to be installed for the GUI to work properly. Because MacOS is the only system that requires this, it is not included in the requirements.txt file. You can install it with:
+
+```bash
+pip install pyobjc
+```
+
+The specific version that was installed was `pyobjc==11.1`. If anything newer gets installed, and presents issues, use that version.
+
+### Windows
+------------
+
+Just install python as normal. Pyhthon 3.13.5 was used for testing the GUI and worked fine with everything in the requirements.txt file.
+
 
 Compression Script
 ------------
