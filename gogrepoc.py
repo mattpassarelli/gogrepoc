@@ -1913,10 +1913,10 @@ def makeGitHubSession(authenticatedSession=False):
     gitSession.headers={'User-Agent':USER_AGENT,'Accept':'application/vnd.github.v3+json'}
     return gitSession    
         
-def makeGOGSession(loginSession=False):
+def makeGOGSession(loginSession=False, tokenPath=TOKEN_FILENAME):
     gogSession = requests.Session()
     if not loginSession:
-        gogSession.token = load_token()
+        gogSession.token = load_token(tokenPath)
         try:
             gogSession.headers={'User-Agent':USER_AGENT,'Authorization':'Bearer ' + gogSession.token['access_token']}    
         except (KeyError, AttributeError): 
