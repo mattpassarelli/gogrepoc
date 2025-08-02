@@ -54,7 +54,7 @@ function App() {
 
   const handleUpdate = async () => {
     try {
-      setMessage('Updating game list...');
+      setMessage('Updating game list. Please watch the console for details...');
       const response = await axios.post('/update', {
         os_list: ['windows'], // You might want to make this configurable
         lang_list: ['en'],
@@ -86,7 +86,7 @@ function App() {
     <Container className="mt-5">
       <h1>GOG Repo Manager</h1>
       
-      {error && <Alert variant="danger">{error}</Alert>}
+      {error && <Alert variant="danger" dismissible>{error}</Alert>}
       {message && <Alert variant="success">{message}</Alert>}
 
       {!isAuthenticated ? (

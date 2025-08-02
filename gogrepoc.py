@@ -139,6 +139,7 @@ GAME_STORAGE_DIR = r'.'
 TOKEN_FILENAME = r'gog-token.dat'
 MANIFEST_FILENAME = r'gog-manifest.dat'
 RESUME_MANIFEST_FILENAME = r'gog-resume-manifest.dat'
+DOWNLOADED_GAMES_FILENAME= r'gog-downloaded-games.dat'
 TEMP_EXT = r'.tmp'
 BACKUP_EXT = r'.bak'
 CONFIG_FILENAME = r'gog-config.dat'
@@ -568,6 +569,47 @@ def load_manifest(filepath=MANIFEST_FILENAME):
         return eval(ad)
     except IOError:
         return []
+    
+def load_downloaded_games(filepath=DOWNLOADED_GAMES_FILENAME):
+    info('loading downloads manifest...')
+    try:
+        with codecs.open(filepath, 'r' + universalLineEnd, 'utf-8') as r:
+#            ad = r.read().replace('{', 'AttrDict(**{').replace('}', '})')
+            ad = r.read()
+            compiledregexopen =  re.compile(r"'changelog':.*?'downloads':|({)",re.DOTALL)
+            compiledregexclose = re.compile(r"'changelog':.*?'downloads':|(})",re.DOTALL)
+            compiledregexmungeopen = re.compile(r"[AttrDict(**]+{")
+            compiledregexmungeclose = re.compile(r"}\)+")
+            
+            def myreplacementopen(m):
+                if m.group(1):
+                   return "AttrDict(**{"
+                else:
+                   return m.group(0)
+            def myreplacementclose(m):
+                if m.group(1):
+                    return "})"
+                else:
+                    return m.group(0)
+            
+            mungeDetected = compiledregexmungeopen.search(ad) 
+            if mungeDetected:
+                warn("detected AttrDict error in manifest")
+                ad = compiledregexmungeopen.sub("{",ad)
+                ad = compiledregexmungeclose.sub("}",ad)
+                warn("fixed AttrDict in manifest")                
+
+            ad =  compiledregexopen.sub(myreplacementopen,ad)
+            ad =  compiledregexclose.sub(myreplacementclose,ad)
+
+            if (sys.version_info[0] >= 3):
+                ad = re.sub(r"'size': ([0-9]+)L,",r"'size': \1,",ad)
+            db = eval(ad)
+            if (mungeDetected):
+                save_manifest(db)
+        return eval(ad)
+    except IOError:
+        return []
 
 def save_manifest(items,filepath=MANIFEST_FILENAME,update_md5_xml=False,delete_md5_xml=False):
     if update_md5_xml:
@@ -716,6 +758,30 @@ def save_manifest_core(items,filepath=MANIFEST_FILENAME):
     info('saved manifest')
     
 
+def save_downloaded_games_manifest(items,filepath=DOWNLOADED_GAMES_FILENAME):
+    save_downloaded_games_manifest_core(items, filepath)
+
+def save_downloaded_games_manifest_core(items,filepath=DOWNLOADED_GAMES_FILENAME):    
+    info('saving downloaded games manifest...')
+    save_downloaded_games_manifest_core_worker(items,filepath)
+    info('saved downloaded games manifest')
+
+def save_downloaded_games_manifest_core_worker(items, filepath, hasManifestPropsItem=False):
+    tmp_path = filepath+TEMP_EXT
+    bak_path = filepath+BACKUP_EXT
+    if os.path.exists(filepath):
+        shutil.copy(filepath,tmp_path)
+    len_adjustment = 0
+    if (hasManifestPropsItem):
+        len_adjustment = -1
+    with codecs.open(tmp_path, 'w', 'utf-8') as w:
+        print('# {} games'.format(len(items)+len_adjustment), file=w)
+        pprint.pprint(items, width=123, stream=w)
+    if os.path.exists(bak_path):
+        os.remove(bak_path)
+    if os.path.exists(filepath):
+        shutil.move(filepath,bak_path)
+    shutil.move(tmp_path,filepath)    
 
 def save_resume_manifest(items):
     info('saving resume manifest...')
@@ -3398,12 +3464,16 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
         raise
 
     wChanged = False;
+    completed_downloads = []
     
     #Everything here would be done inside a lock so may as well process it in the main thread.
     while not work_provisional.empty():
         (path,provisional_path,writable_game_item,work_writable_items) = work_provisional.get()
         info("moving provisionally completed download '%s' to '%s'  " % (provisional_path,path))
         shutil.move(provisional_path,path)
+
+        completed_downloads.append(writable_game_item)
+
         if writable_game_item != None:
             try:
                 _ = writable_game_item.force_change
@@ -3433,7 +3503,9 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
     if wChanged:  
         save_manifest(work_writable_items)
 
-    
+    # Track the downloads
+    save_downloaded_games_manifest(completed_downloads)
+
     for dir in os.listdir(downloading_root_dir):
         if dir != PROVISIONAL_DIR_NAME:
             testdir= os.path.join(downloading_root_dir,dir)

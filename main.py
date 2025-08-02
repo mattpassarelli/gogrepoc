@@ -4,17 +4,10 @@ from typing import List, Optional
 from pprint import pprint
 import sys
 import os
-
-
-# Add parent directory to path so we can import gogrepoc
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gogrepoc
 
 app = FastAPI(title="GOG Repo API")
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Request/Response Models
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -119,10 +112,15 @@ async def download(request: DownloadRequest):
 @app.get("/manifest")
 async def get_manifest():
     try:
-        maifest_path = os.path.join(project_root, gogrepoc.MANIFEST_FILENAME)
-        manifest = gogrepoc.load_manifest(filepath=maifest_path)
+        manifest = gogrepoc.load_manifest()
+        downloaded_manifest = gogrepoc.load_downloaded_games()
+        pprint("Downloaded Manifest:")
+        pprint(downloaded_manifest)
         # Convert the manifest items to a simpler format for the frontend
-        games = [{"id": game.id, "title": game.title, "folder_name": game.folder_name} for game in manifest]
+        # Format the title by replacing underscores with spaces and capitalizing each word
+        games = [{"id": game.id, 
+                 "title": " ".join(word.capitalize() for word in game.title.replace("_", " ").split()),
+                 "folder_name": game.folder_name} for game in manifest]
         return {"status": "success", "games": games}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -130,8 +128,7 @@ async def get_manifest():
 @app.get("/check-auth")
 async def check_auth():
     try:
-        token_path = os.path.join(project_root, gogrepoc.TOKEN_FILENAME)
-        session = gogrepoc.makeGOGSession(tokenPath=token_path)
+        session = gogrepoc.makeGOGSession()
         # If we get here, the token is valid
         return {"status": "success", "isAuthenticated": True}
     except Exception as e:
