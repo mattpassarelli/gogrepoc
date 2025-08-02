@@ -771,16 +771,28 @@ def save_downloaded_games_manifest_core_worker(items, filepath, hasManifestProps
     bak_path = filepath+BACKUP_EXT
     if os.path.exists(filepath):
         shutil.copy(filepath,tmp_path)
+
     len_adjustment = 0
+
     if (hasManifestPropsItem):
         len_adjustment = -1
+
+    previously_downloaded_games = load_downloaded_games(filepath)
+    # merge the previously downloaded games with the current items
+    for item in previously_downloaded_games:
+        if item not in items:
+            items.append(item)
+
     with codecs.open(tmp_path, 'w', 'utf-8') as w:
         print('# {} games'.format(len(items)+len_adjustment), file=w)
         pprint.pprint(items, width=123, stream=w)
+
     if os.path.exists(bak_path):
         os.remove(bak_path)
+
     if os.path.exists(filepath):
         shutil.move(filepath,bak_path)
+
     shutil.move(tmp_path,filepath)    
 
 def save_resume_manifest(items):
@@ -4324,6 +4336,9 @@ def cmd_gui(args):
 
 
 def compress_folders(source_directory):
+    # TODO: rename function
+    # rename folders to capitalize the first letter of each word
+    # try and fetch the proper name and release year from somewhere so GameVault can categorize them properly
     """
     Compresses all folders in the given source directory into 7z archives compatible with GameVault.
     Folders starting with '!' are skipped.
