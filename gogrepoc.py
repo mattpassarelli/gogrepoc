@@ -766,6 +766,35 @@ def save_downloaded_games_manifest_core(items,filepath=DOWNLOADED_GAMES_FILENAME
     info('saved downloaded games manifest')
 
 def save_downloaded_games_manifest_core_worker(items, filepath, hasManifestPropsItem=False):
+
+    def filter_dupes(items):
+        choice_by_id = {}
+        
+        for obj in items:
+            obj_id = obj['id']
+            title = obj['title']
+            
+            if obj_id not in choice_by_id:
+                # Haven’t seen this id yet — take it
+                choice_by_id[obj_id] = obj
+            else:
+                current_choice = choice_by_id[obj_id]
+                # If this title has "(part 1 of" and the current doesn't, favor this one
+                if ("part 1 of" in title.lower() 
+                    and "part 1 of" not in current_choice['title'].lower()):
+                    choice_by_id[obj_id] = obj
+
+        # Now clean up the titles to remove "(Part X of Y)" if present
+        cleaned = []
+        part_pattern = re.compile(r"\s*\(part\s*\d+\s*of\s*\d+\)", re.IGNORECASE)
+
+        for obj in choice_by_id.values():
+            cleaned_obj = obj.copy()
+            cleaned_obj['title'] = re.sub(part_pattern, "", obj['title']).strip()
+            cleaned.append(cleaned_obj)
+
+        return cleaned
+
     tmp_path = filepath+TEMP_EXT
     bak_path = filepath+BACKUP_EXT
     if os.path.exists(filepath):
@@ -775,6 +804,9 @@ def save_downloaded_games_manifest_core_worker(items, filepath, hasManifestProps
 
     if (hasManifestPropsItem):
         len_adjustment = -1
+
+    # filter items by id. remove duplicates
+    items = filter_dupes(items)
 
     previously_downloaded_games = load_downloaded_games(filepath)
     # merge the previously downloaded games with the current items
@@ -2749,6 +2781,7 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
             
         if skipshared:
             filtered_sharedDownloads = []      
+
         downloadsOS = [game_item for game_item in filtered_downloads if game_item.os_type in os_list]
         filtered_downloads= downloadsOS
         #print(item.downloads)
@@ -2776,6 +2809,9 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
         downloadslangs = [game_item for game_item in filtered_sharedDownloads if game_item.lang in valid_langs]
         filtered_sharedDownloads = downloadslangs
 
+        # add the item.id to each list item
+        for game_item in filtered_downloads + filtered_galaxyDownloads + filtered_sharedDownloads + filtered_extras:
+            game_item.id = item.id
 
         # Generate and save a game info text file
         if not dryrun:
@@ -3469,8 +3505,12 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
         (path,provisional_path,writable_game_item,work_writable_items) = work_provisional.get()
         info("moving provisionally completed download '%s' to '%s'  " % (provisional_path,path))
         shutil.move(provisional_path,path)
+        
+        downloaded_item = {}
+        downloaded_item['title'] = writable_game_item.desc
+        downloaded_item['id'] = writable_game_item.id
 
-        completed_downloads.append(writable_game_item)
+        completed_downloads.append(downloaded_item)
 
         if writable_game_item != None:
             try:
@@ -4087,6 +4127,43 @@ def compress_games(source_directory):
                 print(f"Failed to compress {folder}: {e}")
             except Exception as e:
                 print(f"Failed to delete folder {folder}: {e}")
+
+
+def add_games_without_download(ids, savedir):
+    """
+    For people who externally track what games are downloaded
+
+    Fetch the MD5 from the manfiest and store it in the gog-downloaded-game.dat
+    """
+    items = load_manifest()
+
+    if ids:
+        formattedIds =  ', '.join(map(str, ids))
+        info("downloading games with id(s): {%s}" % formattedIds)
+        downloadItems = [item for item in items if item.title in ids or str(item.id) in ids]
+        items = downloadItems
+        
+    if not items:
+        if ids:
+            error('no game with id in "{}" was found.'.format(ids))                
+        else:    
+            error('no game found')      
+        exit(1)
+
+    handle_game_renames(savedir, items, False)
+    
+    completed_downloads = []
+
+    for item in items:
+        downloaded_item = {}
+        downloaded_item['title'] = item._long_title_mirror
+        downloaded_item['id'] = item.id
+        
+        completed_downloads.append(downloaded_item)
+
+
+    save_downloaded_games_manifest(completed_downloads)
+
 
 def update_self():
     #To-Do: add auto-update to main using Last-Modified (repo for rolling, latest release for standard)

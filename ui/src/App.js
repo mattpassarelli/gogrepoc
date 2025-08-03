@@ -7,9 +7,47 @@ import {
   ListGroup,
   Row,
   Col,
+  Modal,
 } from "react-bootstrap";
 import axios from "axios";
 import "bootstrap/dist/css/bootstrap.min.css";
+
+// Add custom dark mode styles
+const darkModeStyles = `
+  .list-group-item {
+    background-color: #2b3035;
+    border-color: #373b3e;
+    color: #e9ecef;
+  }
+  .list-group-item:hover {
+    background-color: #343a40;
+  }
+  .list-group-item.active {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+  }
+  .list-group-item.disabled {
+    background-color: #1a1d20;
+    color: #6c757d;
+  }
+  .form-control {
+    background-color: #2b3035;
+    border-color: #373b3e;
+    color: #e9ecef;
+  }
+  .form-control:focus {
+    background-color: #2b3035;
+    border-color: #565e64;
+    color: #e9ecef;
+  }
+  .form-check-input {
+    background-color: #2b3035;
+    border-color: #373b3e;
+  }
+  .form-check-label {
+    color: #e9ecef;
+  }
+`;
 
 function App() {
   const [username, setUsername] = useState("");
@@ -25,6 +63,8 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [savedir, setSavedir] = useState("C:/Games/GOG");
   const [compressDownloads, setCompressDownloads] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedGamesToAdd, setSelectedGamesToAdd] = useState([]);
 
   // Check authentication and load games list on component mount
   useEffect(() => {
@@ -49,6 +89,8 @@ function App() {
       const response = await axios.get("/manifest");
       setAvailableGames(response.data.available_games);
       setDownloadedGames(response.data.downloaded_games || []);
+      setSelectedToDownloadGames([]);
+      setGamesToDownload([]);
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to load games");
     }
@@ -117,11 +159,29 @@ function App() {
     }
   };
 
+  const handleAddWithoutDownload = async () => {
+    try {
+      const selectedIds = selectedGamesToAdd.map((game) => game.id.toString());
+      const response = await axios.post("/add_without_download", {
+        ids: selectedIds,
+        savedir: savedir,
+      });
+      setMessage(response.data.message);
+      fetchGames(); // Refresh the games list
+      setShowAddModal(false);
+      setSelectedGamesToAdd([]);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Failed to add games");
+    }
+  };
+
   const handleDownload = async () => {
     try {
       setDownloading(true);
+      setMessage("Starting download. Please watch the console for details...");
+
       const selectedIds = gamesToDownload.map((game) => game.id.toString());
-      console.log("Selected IDs for download:", selectedIds);
+
       const response = await axios.post("/download", {
         savedir: savedir,
         os_list: ["windows"],
@@ -138,16 +198,30 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    // Set dark theme on body when component mounts
+    document.body.setAttribute("data-bs-theme", "dark");
+    return () => {
+      // Clean up when component unmounts
+      document.body.removeAttribute("data-bs-theme");
+    };
+  }, []);
+
   return (
     <Container className="mt-5">
-      <h1>GOG Repo Manager</h1>
+      <style>{darkModeStyles}</style>
+      <h1 className="text-light">GOG Repo Manager</h1>
 
       {error && (
         <Alert variant="danger" dismissible>
           {error}
         </Alert>
       )}
-      {message && <Alert variant="success">{message}</Alert>}
+      {message && (
+        <Alert variant="success" dismissible>
+          {message}
+        </Alert>
+      )}
 
       {!isAuthenticated ? (
         <Form onSubmit={handleLogin} className="mb-4">
@@ -177,7 +251,7 @@ function App() {
             Update List
           </Button>
           <div className="d-flex align-items-center gap-2">
-            <Form.Group style={{ width: '300px' }} className="m-0">
+            <Form.Group style={{ width: "300px" }} className="m-0">
               <Form.Control
                 type="text"
                 value={savedir}
@@ -207,7 +281,7 @@ function App() {
 
       <Row className="mt-4">
         <Col>
-          <h4>Available Games</h4>
+          <h4>{`Available Games (${availableGames.length})`}</h4>
           <ListGroup style={{ height: "400px", overflow: "auto" }}>
             {availableGames.map((game) => (
               <ListGroup.Item
@@ -295,11 +369,94 @@ function App() {
           </div>
 
           <div>
-            <h6>Already Downloaded</h6>
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h6 className="m-0">{`Already Downloaded (${downloadedGames.length})⬇️`}</h6>
+              <span
+                className="text-muted"
+                style={{
+                  cursor: "pointer",
+                  fontSize: "0.9em",
+                  transition: "all 0.2s ease",
+                  ":hover": { textDecoration: "underline" },
+                }}
+                onMouseEnter={(e) =>
+                  (e.target.style.textDecoration = "underline")
+                }
+                onMouseLeave={(e) => (e.target.style.textDecoration = "none")}
+                onClick={() => setShowAddModal(true)}
+              >
+                Need to add games to this list?
+              </span>
+            </div>
+
+            <Modal
+              show={showAddModal}
+              onHide={() => {
+                setShowAddModal(false);
+                setSelectedGamesToAdd([]);
+              }}
+              size="lg"
+            >
+              <Modal.Header closeButton>
+                <Modal.Title>Add Games to Downloaded List</Modal.Title>
+              </Modal.Header>
+              <Modal.Body>
+                <p className="text-muted mb-3">
+                  Select games that you've already downloaded to add them to
+                  your downloaded games list.
+                </p>
+                <ListGroup style={{ maxHeight: "400px", overflow: "auto" }}>
+                  {availableGames.map((game) => (
+                    <ListGroup.Item
+                      key={game.id}
+                      action
+                      active={selectedGamesToAdd.some(
+                        (selected) => selected.id === game.id
+                      )}
+                      onClick={() => {
+                        const isSelected = selectedGamesToAdd.some(
+                          (selected) => selected.id === game.id
+                        );
+                        if (isSelected) {
+                          setSelectedGamesToAdd(
+                            selectedGamesToAdd.filter(
+                              (selected) => selected.id !== game.id
+                            )
+                          );
+                        } else {
+                          setSelectedGamesToAdd([...selectedGamesToAdd, game]);
+                        }
+                      }}
+                    >
+                      {game.title}
+                    </ListGroup.Item>
+                  ))}
+                </ListGroup>
+              </Modal.Body>
+              <Modal.Footer>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setSelectedGamesToAdd([]);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleAddWithoutDownload}
+                  disabled={selectedGamesToAdd.length === 0}
+                >
+                  Add Selected Games ({selectedGamesToAdd.length})
+                </Button>
+              </Modal.Footer>
+            </Modal>
+
             <ListGroup style={{ height: "200px", overflow: "auto" }}>
               {downloadedGames.map((game) => (
                 <ListGroup.Item key={game.id} disabled>
-                  {game.title} ⬇️
+                  {game.title}
                 </ListGroup.Item>
               ))}
             </ListGroup>

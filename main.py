@@ -35,13 +35,13 @@ class UpdateRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     savedir: str
-    skipextras: bool = False
+    skipextras: bool = True
     skipids: List[str] = []
     dryrun: bool = False
     ids: List[str] = []
     os_list: List[str] = []
     lang_list: List[str] = []
-    skipgalaxy: bool = False
+    skipgalaxy: bool = True
     skipstandalone: bool = False
     skipshared: bool = False
     skipfiles: List[str] = []
@@ -51,6 +51,11 @@ class DownloadRequest(BaseModel):
     clean_old_images: bool = True
     downloadlimit: Optional[float] = None
     compress_downloads: bool = False
+
+
+class AddRequest(BaseModel):
+    ids: List[str]
+    savedir: str
 
 
 @app.post("/login")
@@ -111,8 +116,7 @@ async def download(request: DownloadRequest):
         )
 
         if request.compress_downloads:
-            # TODO: rename function
-            gogrepoc.compress_folders(request.savedir)
+            gogrepoc.compress_games(request.savedir)
             return {
                 "status": "success",
                 "message": "Download and compression completed successfully",
@@ -132,17 +136,10 @@ async def get_manifest():
         # Compare both manifests to find downloaded games
         # if a game exists in the downloaded manifest, remove it from the main manifest
         for game in downloaded_manifest:
-            # game md5
-            # game.gog_data.md5_xml.md5
-            game_md5 = game.md5
-            if game_md5:
-                # check m.downloads[0].md5 first,
-                # if it doesn't, try extras[0].md5
+            game_id = game.id
+            if game_id:
                 for m in manifest:
-                    if m.downloads and m.downloads[0].md5 == game_md5:
-                        manifest.remove(m)
-                        break
-                    elif m.extras and m.extras[0].md5 == game_md5:
+                    if m.id == game_id:
                         manifest.remove(m)
                         break
 
@@ -159,9 +156,9 @@ async def get_manifest():
         ]
         downloaded_games = [
             {
-                "id": game.md5,
+                "id": game.id,
                 "title": " ".join(
-                    word.capitalize() for word in game.desc.replace("_", " ").split()
+                    word.capitalize() for word in game.title.replace("_", " ").split()
                 ),
                 "selectable": "False",
             }
@@ -185,6 +182,15 @@ async def check_auth():
         return {"status": "success", "isAuthenticated": True}
     except Exception as e:
         return {"status": "error", "isAuthenticated": False, "detail": str(e)}
+
+
+@app.post("/add_without_download")
+async def add_without_download(request: AddRequest):
+    try:
+        gogrepoc.add_games_without_download(request.ids, request.savedir)
+        return {"status": "success", "message": "Games added without download"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
