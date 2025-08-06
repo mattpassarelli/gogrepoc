@@ -4,7 +4,6 @@
 *.bat
 *.dat
 *.log
-*.html
 *.dump
 *.tmp
 *.bak
