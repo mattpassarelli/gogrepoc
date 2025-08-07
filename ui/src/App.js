@@ -17,8 +17,6 @@ const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
 axios.defaults.baseURL = apiUrl;
 axios.defaults.withCredentials = true;
 
-const savedir = process.env.REACT_APP_DEFAULT_SAVE_DIR || "/games";
-
 // Add custom dark mode styles
 const darkModeStyles = `
   .list-group-item {
@@ -68,6 +66,7 @@ function App() {
   const [error, setError] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [savedir, setSavedir] = useState("C:/Games/GOG");
   const [compressDownloads, setCompressDownloads] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedGamesToAdd, setSelectedGamesToAdd] = useState([]);
@@ -229,7 +228,7 @@ function App() {
         </Alert>
       )}
 
-      {!isAuthenticated ? (
+      {!isAuthenticated && (
         <Form onSubmit={handleLogin} className="mb-4">
           <Form.Group className="mb-3">
             <Form.Label>GOG Email</Form.Label>
@@ -251,32 +250,6 @@ function App() {
 
           <Button type="submit">Login</Button>
         </Form>
-      ) : (
-        <div className="d-flex gap-2 mb-4">
-          <Button onClick={handleUpdate} variant="info">
-            Update List
-          </Button>
-          <div className="d-flex align-items-center gap-2">
-            <Form.Group style={{ width: "300px" }} className="m-0">
-            </Form.Group>
-            <div className="d-flex flex-column gap-2">
-              <Button
-                onClick={handleDownload}
-                variant="success"
-                disabled={downloading}
-              >
-                {downloading ? "Downloading..." : "Download Games"}
-              </Button>
-              <Form.Check
-                type="checkbox"
-                id="compress-downloads"
-                label="Compress downloads?"
-                checked={compressDownloads}
-                onChange={(e) => setCompressDownloads(e.target.checked)}
-              />
-            </div>
-          </div>
-        </div>
       )}
 
       <Row className="mt-4">
@@ -462,6 +435,43 @@ function App() {
             </ListGroup>
           </div>
         </Col>
+      </Row>
+
+      <Row className="mt-4">
+        <div style={{ display: "flex", justifyContent: "space-evenly" }}>
+          <Button onClick={handleUpdate} variant="info">
+            Update List
+          </Button>
+          <div className="d-flex align-items-center gap-2">
+            <span>Download Path:</span>
+            <Form.Group style={{ width: "300px" }} className="m-0">
+              <Form.Control
+                type="text"
+                value={savedir}
+                onChange={(e) => setSavedir(e.target.value)}
+                placeholder="Enter download path (e.g., C:/Games/GOG)"
+              />
+            </Form.Group>
+          </div>
+          <div>
+            <div className="d-flex flex-column gap-2">
+              <Button
+                onClick={handleDownload}
+                variant="success"
+                disabled={downloading}
+              >
+                {downloading ? "Downloading..." : "Download Games"}
+              </Button>
+              <Form.Check
+                type="checkbox"
+                id="compress-downloads"
+                label="Compress downloads?"
+                checked={compressDownloads}
+                onChange={(e) => setCompressDownloads(e.target.checked)}
+              />
+            </div>
+          </div>
+        </div>
       </Row>
     </Container>
   );

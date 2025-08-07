@@ -142,7 +142,6 @@ async def download(request: DownloadRequest):
 @app.get("/manifest")
 async def get_manifest():
     try:
-        import pdb; pdb.set_trace()  # Debugging breakpoint
         manifest = gogrepoc.load_manifest()
         downloaded_manifest = gogrepoc.load_downloaded_games()
 
