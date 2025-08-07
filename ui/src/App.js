@@ -12,6 +12,13 @@ import {
 import axios from "axios";
 import "bootstrap/dist/css/bootstrap.min.css";
 
+// Configure axios defaults
+const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
+axios.defaults.baseURL = apiUrl;
+axios.defaults.withCredentials = true;
+
+const savedir = process.env.REACT_APP_DEFAULT_SAVE_DIR || "/games";
+
 // Add custom dark mode styles
 const darkModeStyles = `
   .list-group-item {
@@ -61,7 +68,6 @@ function App() {
   const [error, setError] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [savedir, setSavedir] = useState("C:/Games/GOG");
   const [compressDownloads, setCompressDownloads] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedGamesToAdd, setSelectedGamesToAdd] = useState([]);
@@ -210,7 +216,7 @@ function App() {
   return (
     <Container className="mt-5">
       <style>{darkModeStyles}</style>
-      <h1 className="text-light">GOG Repo Manager</h1>
+      <h1 className="text-light">GOG Installers Downloader</h1>
 
       {error && (
         <Alert variant="danger" dismissible>
@@ -226,7 +232,7 @@ function App() {
       {!isAuthenticated ? (
         <Form onSubmit={handleLogin} className="mb-4">
           <Form.Group className="mb-3">
-            <Form.Label>Username</Form.Label>
+            <Form.Label>GOG Email</Form.Label>
             <Form.Control
               type="text"
               value={username}
@@ -252,12 +258,6 @@ function App() {
           </Button>
           <div className="d-flex align-items-center gap-2">
             <Form.Group style={{ width: "300px" }} className="m-0">
-              <Form.Control
-                type="text"
-                value={savedir}
-                onChange={(e) => setSavedir(e.target.value)}
-                placeholder="Enter download path (e.g., C:/Games/GOG)"
-              />
             </Form.Group>
             <div className="d-flex flex-column gap-2">
               <Button

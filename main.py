@@ -1,12 +1,24 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from pprint import pprint
 import sys
 import os
 import gogrepoc
+import uvicorn
+
 
 app = FastAPI(title="GOG Repo API")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class LoginRequest(BaseModel):
@@ -130,6 +142,7 @@ async def download(request: DownloadRequest):
 @app.get("/manifest")
 async def get_manifest():
     try:
+        import pdb; pdb.set_trace()  # Debugging breakpoint
         manifest = gogrepoc.load_manifest()
         downloaded_manifest = gogrepoc.load_downloaded_games()
 
@@ -194,6 +207,4 @@ async def add_without_download(request: AddRequest):
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
