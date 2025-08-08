@@ -10,7 +10,6 @@ import {
   Modal,
 } from "react-bootstrap";
 import axios from "axios";
-import "bootstrap/dist/css/bootstrap.min.css";
 
 // Configure axios defaults
 const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
@@ -251,153 +250,88 @@ function App() {
           <Button type="submit">Login</Button>
         </Form>
       )}
-
-      <Row className="mt-4">
-        <Col>
-          <h4>{`Available Games (${availableGames.length})`}</h4>
-          <ListGroup style={{ height: "400px", overflow: "auto" }}>
-            {availableGames.map((game) => (
-              <ListGroup.Item
-                key={game.id}
-                active={selectedAvailableGames.some(
-                  (selected) => selected.id === game.id
-                )}
-                action
-                onClick={() => {
-                  const isSelected = selectedAvailableGames.some(
-                    (selected) => selected.id === game.id
-                  );
-                  if (isSelected) {
-                    setSelectedAvailableGames(
-                      selectedAvailableGames.filter(
-                        (selected) => selected.id !== game.id
-                      )
-                    );
-                  } else {
-                    setSelectedAvailableGames([
-                      ...selectedAvailableGames,
-                      game,
-                    ]);
-                  }
-                }}
-              >
-                {game.title}
-              </ListGroup.Item>
-            ))}
-          </ListGroup>
-        </Col>
-
-        <Col
-          xs="auto"
-          className="d-flex flex-column justify-content-center gap-2"
-        >
-          <Button
-            onClick={handleMoveToDownload}
-            disabled={selectedAvailableGames.length === 0}
-          >
-            &gt;&gt;
-          </Button>
-          <Button
-            onClick={handleMoveToAvailable}
-            disabled={selectedToDownloadGames.length === 0}
-          >
-            &lt;&lt;
-          </Button>
-        </Col>
-
-        <Col>
-          <h4>Games Queue</h4>
-          <div className="mb-2">
-            <h6>To Download</h6>
-            <ListGroup style={{ height: "200px", overflow: "auto" }}>
-              {gamesToDownload.map((game) => (
-                <ListGroup.Item
-                  key={game.id}
-                  active={selectedToDownloadGames.some(
-                    (selected) => selected.id === game.id
-                  )}
-                  action
-                  onClick={() => {
-                    const isSelected = selectedToDownloadGames.some(
+      {isAuthenticated && (
+        <>
+          <Row className="mt-4">
+            <Col>
+              <h4>{`Available Games (${availableGames.length})`}</h4>
+              <ListGroup style={{ height: "400px", overflow: "auto" }}>
+                {availableGames.map((game) => (
+                  <ListGroup.Item
+                    key={game.id}
+                    active={selectedAvailableGames.some(
                       (selected) => selected.id === game.id
-                    );
-                    if (isSelected) {
-                      setSelectedToDownloadGames(
-                        selectedToDownloadGames.filter(
-                          (selected) => selected.id !== game.id
-                        )
+                    )}
+                    action
+                    onClick={() => {
+                      const isSelected = selectedAvailableGames.some(
+                        (selected) => selected.id === game.id
                       );
-                    } else {
-                      setSelectedToDownloadGames([
-                        ...selectedToDownloadGames,
-                        game,
-                      ]);
-                    }
-                  }}
-                >
-                  {game.title}
-                </ListGroup.Item>
-              ))}
-            </ListGroup>
-          </div>
+                      if (isSelected) {
+                        setSelectedAvailableGames(
+                          selectedAvailableGames.filter(
+                            (selected) => selected.id !== game.id
+                          )
+                        );
+                      } else {
+                        setSelectedAvailableGames([
+                          ...selectedAvailableGames,
+                          game,
+                        ]);
+                      }
+                    }}
+                  >
+                    {game.title}
+                  </ListGroup.Item>
+                ))}
+              </ListGroup>
+            </Col>
 
-          <div>
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <h6 className="m-0">{`Already Downloaded (${downloadedGames.length})⬇️`}</h6>
-              <span
-                className="text-muted"
-                style={{
-                  cursor: "pointer",
-                  fontSize: "0.9em",
-                  transition: "all 0.2s ease",
-                  ":hover": { textDecoration: "underline" },
-                }}
-                onMouseEnter={(e) =>
-                  (e.target.style.textDecoration = "underline")
-                }
-                onMouseLeave={(e) => (e.target.style.textDecoration = "none")}
-                onClick={() => setShowAddModal(true)}
-              >
-                Need to add games to this list?
-              </span>
-            </div>
-
-            <Modal
-              show={showAddModal}
-              onHide={() => {
-                setShowAddModal(false);
-                setSelectedGamesToAdd([]);
-              }}
-              size="lg"
+            <Col
+              xs="auto"
+              className="d-flex flex-column justify-content-center gap-2"
             >
-              <Modal.Header closeButton>
-                <Modal.Title>Add Games to Downloaded List</Modal.Title>
-              </Modal.Header>
-              <Modal.Body>
-                <p className="text-muted mb-3">
-                  Select games that you've already downloaded to add them to
-                  your downloaded games list.
-                </p>
-                <ListGroup style={{ maxHeight: "400px", overflow: "auto" }}>
-                  {availableGames.map((game) => (
+              <Button
+                onClick={handleMoveToDownload}
+                disabled={selectedAvailableGames.length === 0}
+              >
+                &gt;&gt;
+              </Button>
+              <Button
+                onClick={handleMoveToAvailable}
+                disabled={selectedToDownloadGames.length === 0}
+              >
+                &lt;&lt;
+              </Button>
+            </Col>
+
+            <Col>
+              <h4>Games Queue</h4>
+              <div className="mb-2">
+                <h6>To Download</h6>
+                <ListGroup style={{ height: "200px", overflow: "auto" }}>
+                  {gamesToDownload.map((game) => (
                     <ListGroup.Item
                       key={game.id}
-                      action
-                      active={selectedGamesToAdd.some(
+                      active={selectedToDownloadGames.some(
                         (selected) => selected.id === game.id
                       )}
+                      action
                       onClick={() => {
-                        const isSelected = selectedGamesToAdd.some(
+                        const isSelected = selectedToDownloadGames.some(
                           (selected) => selected.id === game.id
                         );
                         if (isSelected) {
-                          setSelectedGamesToAdd(
-                            selectedGamesToAdd.filter(
+                          setSelectedToDownloadGames(
+                            selectedToDownloadGames.filter(
                               (selected) => selected.id !== game.id
                             )
                           );
                         } else {
-                          setSelectedGamesToAdd([...selectedGamesToAdd, game]);
+                          setSelectedToDownloadGames([
+                            ...selectedToDownloadGames,
+                            game,
+                          ]);
                         }
                       }}
                     >
@@ -405,74 +339,147 @@ function App() {
                     </ListGroup.Item>
                   ))}
                 </ListGroup>
-              </Modal.Body>
-              <Modal.Footer>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
+              </div>
+
+              <div>
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <h6 className="m-0">{`Already Downloaded (${downloadedGames.length})⬇️`}</h6>
+                  <span
+                    className="text-muted"
+                    style={{
+                      cursor: "pointer",
+                      fontSize: "0.9em",
+                      transition: "all 0.2s ease",
+                      ":hover": { textDecoration: "underline" },
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.target.style.textDecoration = "underline")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.target.style.textDecoration = "none")
+                    }
+                    onClick={() => setShowAddModal(true)}
+                  >
+                    Need to add games to this list?
+                  </span>
+                </div>
+
+                <Modal
+                  show={showAddModal}
+                  onHide={() => {
                     setShowAddModal(false);
                     setSelectedGamesToAdd([]);
                   }}
+                  size="lg"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={handleAddWithoutDownload}
-                  disabled={selectedGamesToAdd.length === 0}
-                >
-                  Add Selected Games ({selectedGamesToAdd.length})
-                </Button>
-              </Modal.Footer>
-            </Modal>
+                  <Modal.Header closeButton>
+                    <Modal.Title>Add Games to Downloaded List</Modal.Title>
+                  </Modal.Header>
+                  <Modal.Body>
+                    <p className="text-muted mb-3">
+                      Select games that you've already downloaded to add them to
+                      your downloaded games list.
+                    </p>
+                    <ListGroup style={{ maxHeight: "400px", overflow: "auto" }}>
+                      {availableGames.map((game) => (
+                        <ListGroup.Item
+                          key={game.id}
+                          action
+                          active={selectedGamesToAdd.some(
+                            (selected) => selected.id === game.id
+                          )}
+                          onClick={() => {
+                            const isSelected = selectedGamesToAdd.some(
+                              (selected) => selected.id === game.id
+                            );
+                            if (isSelected) {
+                              setSelectedGamesToAdd(
+                                selectedGamesToAdd.filter(
+                                  (selected) => selected.id !== game.id
+                                )
+                              );
+                            } else {
+                              setSelectedGamesToAdd([
+                                ...selectedGamesToAdd,
+                                game,
+                              ]);
+                            }
+                          }}
+                        >
+                          {game.title}
+                        </ListGroup.Item>
+                      ))}
+                    </ListGroup>
+                  </Modal.Body>
+                  <Modal.Footer>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setShowAddModal(false);
+                        setSelectedGamesToAdd([]);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={handleAddWithoutDownload}
+                      disabled={selectedGamesToAdd.length === 0}
+                    >
+                      Add Selected Games ({selectedGamesToAdd.length})
+                    </Button>
+                  </Modal.Footer>
+                </Modal>
 
-            <ListGroup style={{ height: "200px", overflow: "auto" }}>
-              {downloadedGames.map((game) => (
-                <ListGroup.Item key={game.id} disabled>
-                  {game.title}
-                </ListGroup.Item>
-              ))}
-            </ListGroup>
-          </div>
-        </Col>
-      </Row>
+                <ListGroup style={{ height: "200px", overflow: "auto" }}>
+                  {downloadedGames.map((game) => (
+                    <ListGroup.Item key={game.id} disabled>
+                      {game.title}
+                    </ListGroup.Item>
+                  ))}
+                </ListGroup>
+              </div>
+            </Col>
+          </Row>
 
-      <Row className="mt-4">
-        <div style={{ display: "flex", justifyContent: "space-evenly" }}>
-          <Button onClick={handleUpdate} variant="info">
-            Update List
-          </Button>
-          <div className="d-flex align-items-center gap-2">
-            <span>Download Path:</span>
-            <Form.Group style={{ width: "300px" }} className="m-0">
-              <Form.Control
-                type="text"
-                value={savedir}
-                onChange={(e) => setSavedir(e.target.value)}
-                placeholder="Enter download path (e.g., C:/Games/GOG)"
-              />
-            </Form.Group>
-          </div>
-          <div>
-            <div className="d-flex flex-column gap-2">
-              <Button
-                onClick={handleDownload}
-                variant="success"
-                disabled={downloading}
-              >
-                {downloading ? "Downloading..." : "Download Games"}
+          <Row className="mt-4">
+            <div style={{ display: "flex", justifyContent: "space-evenly" }}>
+              <Button onClick={handleUpdate} variant="info">
+                Update List
               </Button>
-              <Form.Check
-                type="checkbox"
-                id="compress-downloads"
-                label="Compress downloads?"
-                checked={compressDownloads}
-                onChange={(e) => setCompressDownloads(e.target.checked)}
-              />
+              <div className="d-flex align-items-center gap-2">
+                <span>Download Path:</span>
+                <Form.Group style={{ width: "300px" }} className="m-0">
+                  <Form.Control
+                    type="text"
+                    value={savedir}
+                    onChange={(e) => setSavedir(e.target.value)}
+                    placeholder="Enter download path (e.g., C:/Games/GOG)"
+                  />
+                </Form.Group>
+              </div>
+              <div>
+                <div className="d-flex flex-column gap-2">
+                  <Button
+                    onClick={handleDownload}
+                    variant="success"
+                    disabled={downloading}
+                  >
+                    {downloading ? "Downloading..." : "Download Games"}
+                  </Button>
+                  <Form.Check
+                    type="checkbox"
+                    id="compress-downloads"
+                    label="Compress downloads?"
+                    checked={compressDownloads}
+                    onChange={(e) => setCompressDownloads(e.target.checked)}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      </Row>
+          </Row> 
+        </>
+      )}
     </Container>
   );
 }
