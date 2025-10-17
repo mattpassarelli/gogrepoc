@@ -207,11 +207,6 @@ new GOG folder with clean game directory names and file names as GOG has them na
 
 --
 
-``gogrepoc.py gui`` Starts the GUI interface. 
-
-    gui
---
-
 ``gogrepoc.py compress`` Compresses a dircetory into a highly compressed 7z file. Useful for cold storage, archiving of games, or systems like GameVault.
 
     compress [-compressdir <path>]
@@ -238,7 +233,6 @@ The GUI is built with React and a Python FastAPI server. This lets the system be
 * Easy game selection with multi-select capability
 * Download directory configuration
 * Compression options for downloads
-* Visual feedback for download progress
 * Ability to mark games as downloaded without actually downloading them
 * Real-time updates of game status
 
