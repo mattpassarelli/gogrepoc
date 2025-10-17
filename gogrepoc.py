@@ -2988,9 +2988,9 @@ def cmd_download(savedir, skipextras,skipids, dryrun, ids,os_list, lang_list,ski
                         modified_image_orphandir =  uLongPathPrefix + os.path.abspath(modified_image_orphandir )
                     if os.path.exists(images_old_bg_url_dir_name):
                         try:
-                            if (clean_existing):
+                            if (clean_old_images):
                                 if not os.path.exists( modified_image_orphandir):
-                                    os.makedirs( imodified_image_orphandir)
+                                    os.makedirs( modified_image_orphandir)
                                 move_with_increment_on_clash(images_old_bg_url_dir_name , modified_image_orphandir)
                             else:
                                 shutil.rmtree(images_old_bg_url_dir_name )
