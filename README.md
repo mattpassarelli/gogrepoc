@@ -227,58 +227,93 @@ Other arguments:
 
 GUI
 ------------
-The GUI is really simple, written in PySimpleGUI. A barebones implementation of the CLI commands. It's not as feature-rich as the CLI, but it's a good starting point for those who don't want to use the CLI.
-Requires logging in via the CLI first, but afterwards, the session stays persistent. 
+The GUI is built with React and a Python FastAPI server. This lets the system be even more system agnostic, and run on any system that supports Python and a web browser.
 
-Generates a list of all games from your account that comes from the manifest file. You can then select which games you want to download.
+### Features
 
-Makes grabbing specific games acquired over time easier, as you do not have to search your manifest file for the specific game ID.
+* Clean, modern interface with dark mode support
+* Two-column game selection system:
+  - Available Games list showing all games in your GOG library
+  - Games Queue showing games selected for download and already downloaded games
+* Easy game selection with multi-select capability
+* Download directory configuration
+* Compression options for downloads
+* Visual feedback for download progress
+* Ability to mark games as downloaded without actually downloading them
+* Real-time updates of game status
 
-Allows for easily setting a specified download directory.
+### Setup and Running
 
-Due to PySimpleGUI's requirements, the use of the GUI is only available on Python 3.
-
-## GUI OS Specific Instructions
-
-### Linux/Ubuntu
-------------
-Ubuntu does not support Python Virtual Environments (venv) out of the box. You will need to install the `python3-venv` package first.
-
+#### Linux
+1. Install the required Python packages for the backend:
 ```bash
 sudo apt update
 sudo apt install python3-venv
+python3 -m venv gogrepo-env
+source gogrepo-env/bin/activate
+pip install -r requirements.txt
 ```
 
-Then you can create a virtual environment and install the required packages.
-
-The default instances of Python on Linux also do not include tkinter like they do on Windows. You'll need to install the `python3-tk` package.
-
+2. Install Node.js dependencies for the UI:
 ```bash
-sudo apt install python3-tk
+cd ui
+npm install
+npm run build
+cd ..
 ```
 
-### MacOS
-------------
-Tested on the latest MacOS 15.5. The default Python installation can be problematic, so I recommend using Homebrew to install Python 3.11. Specifically, <=3.11. Anything later has issues as noted [here](https://github.com/orgs/Homebrew/discussions/5809#discussioncomment-11638857).
-
+3. Start the backend server:
 ```bash
-brew install python@3.11
+uvicorn main:app --port 8000
 ```
 
-Then you can create a virtual environment and install the required packages.
-
-MacOS also specfically requires the `pyobjc` package to be installed for the GUI to work properly. Because MacOS is the only system that requires this, it is not included in the requirements.txt file. You can install it with:
-
+4. In a second terminal window, start a simple HTTP server to serve the React build files:
 ```bash
-pip install pyobjc
+cd ui
+python3 -m http.server 3000 --directory ./ui/build
 ```
 
-The specific version that was installed was `pyobjc==11.1`. If anything newer gets installed, and presents issues, use that version.
+5. Open your web browser and navigate to `http://localhost:3000` to access the GUI.
 
-### Windows
-------------
+#### Windows
+1. Install the required Python packages for the backend:
+```powershell
+python -m venv gogrepo-env
+.\gogrepo-env\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+2. Install Node.js dependencies for the UI:
+```powershell
+cd ui
+npm install
+npm run build
+cd ..
+```
 
-Just install python as normal. Pyhthon 3.13.5 was used for testing the GUI and worked fine with everything in the requirements.txt file.
+3. Start the backend server:
+```powershell
+uvicorn main:app --port 8000 
+```
+
+4. In a second terminal window, start a simple HTTP server to serve the React build files:
+```powershell
+cd ui
+python -m http.server 3000 --directory .\ui\build
+```
+
+5. Open your web browser and navigate to `http://localhost:3000` to access the GUI.
+
+
+### GUI Workflow
+
+1. Login with your GOG credentials
+2. Use the "Update List" button to fetch your game library
+3. Select games from the Available Games list
+4. Move them to the download queue using the arrow buttons
+5. Configure your download directory
+6. Optional: Enable compression for downloads
+7. Click "Download Games" to start downloading
+8. Optional: Ability to add games to the manifest without downloading them
 
 
 Compression Script
