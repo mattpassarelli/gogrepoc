@@ -231,10 +231,9 @@ The GUI is built with React and a Python FastAPI server. This lets the system be
   - Available Games list showing all games in your GOG library
   - Games Queue showing games selected for download and already downloaded games
 * Easy game selection with multi-select capability
-* Download directory configuration
+* Download directory is configurable
 * Compression options for downloads
 * Ability to mark games as downloaded without actually downloading them
-* Real-time updates of game status
 
 ### Setup and Running
 
