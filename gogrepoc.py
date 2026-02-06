@@ -10,9 +10,9 @@ if False:
     print("Please start this script with a python interpreter: python /path/to/gogrepoc.py")
 #END#
 __appname__ = 'gogrepoc.py'
-__author__ = 'eddie3,kalaynr'
+__author__ = 'eddie3,kalaynr,mattpassarelli'
 __version__ = '0.4.0-a'
-__url__ = 'https://github.com/kalanyr/gogrepoc'
+__url__ = 'https://github.com/mattpassarelli/gogrepoc'
 
 
 # imports
