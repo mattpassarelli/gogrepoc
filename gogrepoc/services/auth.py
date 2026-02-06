@@ -32,13 +32,14 @@ class AuthService:
     """
 
     # GOG authentication endpoints
-    AUTH_URL = "https://auth.gog.com/token"
+    AUTH_URL = "https://auth.gog.com/auth"
+    TOKEN_URL = "https://auth.gog.com/token"
     LOGIN_URL = "https://login.gog.com/login_check"
     
     # OAuth client credentials for GOG API
     CLIENT_ID = "46899977096215655"
     CLIENT_SECRET = "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9"
-    REDIRECT_URI = "https://embed.gog.com/on_login_success?origin=client"
+    REDIRECT_URI = "https://embed.gog.com/on_login_success"
 
     def __init__(self, storage: Storage, http_client: HTTPClient):
         """Initialize AuthService with dependencies.
@@ -55,8 +56,12 @@ class AuthService:
     async def login(self, username: str, password: str, two_factor_code: Optional[str] = None) -> Token:
         """Authenticate with GOG and obtain access token.
 
-        Sends user credentials to GOG API and retrieves an OAuth token.
-        The token is stored both in memory and persisted to disk.
+        Uses GOG's browser-based OAuth flow:
+        1. Fetch auth page to get login token
+        2. POST credentials to login endpoint
+        3. Handle 2FA if required
+        4. Extract authorization code from redirect
+        5. Exchange code for access token
 
         Args:
             username: GOG account username/email
@@ -69,54 +74,188 @@ class AuthService:
         Raises:
             AuthError: If authentication fails (invalid credentials, 2FA required, etc.)
         """
+        import html5lib
+        from urllib.parse import urlparse, parse_qs
+        import time
+
         logger.info(f"Attempting login for user: {username}")
 
         try:
-            # Prepare authentication request data
-            auth_data = {
-                "client_id": self.CLIENT_ID,
-                "client_secret": self.CLIENT_SECRET,
-                "grant_type": "password",
-                "username": username,
-                "password": password,
+            # Step 1: Fetch the auth page to get login token
+            auth_params = {
+                'client_id': self.CLIENT_ID,
+                'redirect_uri': self.REDIRECT_URI + '?origin=client',
+                'response_type': 'code',
+                'layout': 'client2'
             }
-
-            # Add 2FA code if provided
-            if two_factor_code:
-                auth_data["two_step_code"] = two_factor_code
-
-            # Send authentication request
-            response = await self.http_client.post(
-                self.AUTH_URL,
-                data=auth_data,
+            
+            auth_page_url = f"https://auth.gog.com/auth"
+            auth_response = await self.http_client.get(auth_page_url, params=auth_params)
+            
+            # Parse HTML to extract login token
+            etree = html5lib.parse(auth_response.text, namespaceHTMLElements=False)
+            login_form = etree.find('.//form[@name="login"]')
+            
+            if login_form is None:
+                raise AuthError("Could not find login form on auth page", username=username)
+            
+            # Check for reCAPTCHA
+            if len(login_form.findall('.//div[@class="g-recaptcha form__recaptcha"]')) > 0:
+                raise AuthError(
+                    "GOG is requesting reCAPTCHA. Please login via browser at: " + auth_response.url,
+                    username=username
+                )
+            
+            # Extract login token
+            login_token = None
+            for elm in etree.findall('.//input'):
+                if elm.attrib.get('id') == 'login__token':
+                    login_token = elm.attrib.get('value')
+                    break
+            
+            if not login_token:
+                raise AuthError("Could not extract login token from auth page", username=username)
+            
+            # Step 2: POST credentials to login endpoint
+            login_data = {
+                'login[username]': username,
+                'login[password]': password,
+                'login[login]': '',
+                'login[_token]': login_token
+            }
+            
+            login_response = await self.http_client.post(
+                self.LOGIN_URL,
+                data=login_data,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
-
-            # Parse response
-            token_data = response.json()
-
-            # Check for errors in response
-            if "error" in token_data:
-                error_msg = token_data.get("error_description", token_data["error"])
+            
+            # Parse response to check for 2FA or success
+            etree = html5lib.parse(login_response.text, namespaceHTMLElements=False)
+            login_code = None
+            
+            # Convert URL to string for checking
+            response_url = str(login_response.url)
+            
+            # Check if we got the success redirect with authorization code
+            if 'on_login_success' in response_url:
+                parsed = urlparse(response_url)
+                query_parsed = parse_qs(parsed.query)
+                login_code = query_parsed.get('code', [None])[0]
+            
+            # Check for TOTP 2FA
+            elif 'totp' in response_url:
+                if not two_factor_code:
+                    raise AuthError("Two-factor authentication (TOTP) required", username=username)
                 
-                # Check if 2FA is required
-                if "two" in error_msg.lower() or "second" in error_msg.lower():
-                    raise AuthError("Two-factor authentication required", username=username)
+                # Extract TOTP token
+                totp_token = None
+                for elm in etree.findall('.//input'):
+                    if elm.attrib.get('id') == 'two_factor_totp_authentication__token':
+                        totp_token = elm.attrib.get('value')
+                        break
                 
-                raise AuthError(error_msg, username=username)
-
+                if not totp_token:
+                    raise AuthError("Could not extract TOTP token", username=username)
+                
+                # Submit 2FA code
+                totp_data = {
+                    'two_factor_totp_authentication[token][letter_1]': two_factor_code[0],
+                    'two_factor_totp_authentication[token][letter_2]': two_factor_code[1],
+                    'two_factor_totp_authentication[token][letter_3]': two_factor_code[2],
+                    'two_factor_totp_authentication[token][letter_4]': two_factor_code[3],
+                    'two_factor_totp_authentication[token][letter_5]': two_factor_code[4],
+                    'two_factor_totp_authentication[token][letter_6]': two_factor_code[5],
+                    'two_factor_totp_authentication[send]': '',
+                    'two_factor_totp_authentication[_token]': totp_token
+                }
+                
+                totp_response = await self.http_client.post(
+                    response_url,
+                    data=totp_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                
+                totp_response_url = str(totp_response.url)
+                if 'on_login_success' in totp_response_url:
+                    parsed = urlparse(totp_response_url)
+                    query_parsed = parse_qs(parsed.query)
+                    login_code = query_parsed.get('code', [None])[0]
+            
+            # Check for email 2FA
+            elif 'two_step' in response_url:
+                if not two_factor_code:
+                    raise AuthError("Two-factor authentication (email) required", username=username)
+                
+                # Extract two-step token
+                two_step_token = None
+                for elm in etree.findall('.//input'):
+                    if elm.attrib.get('id') == 'second_step_authentication__token':
+                        two_step_token = elm.attrib.get('value')
+                        break
+                
+                if not two_step_token:
+                    raise AuthError("Could not extract two-step token", username=username)
+                
+                # Submit 2FA code
+                two_step_data = {
+                    'second_step_authentication[token][letter_1]': two_factor_code[0],
+                    'second_step_authentication[token][letter_2]': two_factor_code[1],
+                    'second_step_authentication[token][letter_3]': two_factor_code[2],
+                    'second_step_authentication[token][letter_4]': two_factor_code[3],
+                    'second_step_authentication[send]': '',
+                    'second_step_authentication[_token]': two_step_token
+                }
+                
+                two_step_response = await self.http_client.post(
+                    response_url,
+                    data=two_step_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                
+                two_step_response_url = str(two_step_response.url)
+                if 'on_login_success' in two_step_response_url:
+                    parsed = urlparse(two_step_response_url)
+                    query_parsed = parse_qs(parsed.query)
+                    login_code = query_parsed.get('code', [None])[0]
+            
+            if not login_code:
+                raise AuthError("Login failed - could not obtain authorization code", username=username)
+            
+            # Step 3: Exchange authorization code for access token
+            token_start = time.time()
+            token_data = {
+                'client_id': self.CLIENT_ID,
+                'client_secret': self.CLIENT_SECRET,
+                'grant_type': 'authorization_code',
+                'code': login_code,
+                'redirect_uri': self.REDIRECT_URI + '?origin=client'
+            }
+            
+            token_response = await self.http_client.get(
+                self.TOKEN_URL,
+                params=token_data
+            )
+            
+            token_json = token_response.json()
+            
+            # Check for errors
+            if "error" in token_json:
+                error_msg = token_json.get("error_description", token_json["error"])
+                raise AuthError(f"Token exchange failed: {error_msg}", username=username)
+            
             # Extract token information
-            access_token = token_data.get("access_token")
-            refresh_token = token_data.get("refresh_token")
-            expires_in = token_data.get("expires_in", 3600)  # Default 1 hour
-            user_id = token_data.get("user_id")
-
+            access_token = token_json.get("access_token")
+            refresh_token = token_json.get("refresh_token")
+            expires_in = token_json.get("expires_in", 3600)
+            user_id = token_json.get("user_id")
+            
             if not access_token or not refresh_token:
                 raise AuthError("Invalid token response from GOG API", username=username)
-
+            
             # Calculate expiration time
-            expires_at = datetime.now() + timedelta(seconds=expires_in)
-
+            expires_at = datetime.fromtimestamp(token_start + expires_in)
+            
             # Create token object
             token = Token(
                 access_token=access_token,
@@ -124,11 +263,11 @@ class AuthService:
                 expires_at=expires_at,
                 user_id=user_id,
             )
-
+            
             # Store token
             self.storage.save_token(token)
             self._cached_token = token
-
+            
             logger.info(f"Login successful for user: {username}")
             return token
 
