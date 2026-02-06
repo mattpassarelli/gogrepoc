@@ -157,7 +157,11 @@ class Storage:
             return None
 
     def save_manifest(self, games: list[Game]) -> None:
-        """Save game manifest to disk.
+        """Save game manifest to disk with JSON serialization.
+
+        The manifest is saved in JSON format with a version marker to support
+        future format changes. A backup of the previous manifest is created
+        before saving.
 
         Args:
             games: List of Game objects to save
@@ -165,8 +169,20 @@ class Storage:
         Raises:
             OSError: If file cannot be written
         """
+        # Create backup of existing manifest
+        backup_file = self.manifest_file.with_suffix(self.manifest_file.suffix + ".bak")
+        if self.manifest_file.exists():
+            import shutil
+            shutil.copy(self.manifest_file, backup_file)
+            logger.debug(f"Created backup at {backup_file}")
+
         # Convert games to dictionary format for JSON serialization
-        manifest_data = []
+        manifest_data = {
+            "version": 2,  # New JSON format version
+            "game_count": len(games),
+            "games": []
+        }
+        
         for game in games:
             game_dict = {
                 "id": game.id,
@@ -184,52 +200,375 @@ class Storage:
                 "store_url": game.store_url,
                 "has_updates": game.has_updates,
             }
-            manifest_data.append(game_dict)
+            manifest_data["games"].append(game_dict)
 
-        with open(self.manifest_file, "w", encoding="utf-8") as f:
+        # Write to temporary file first, then rename for atomic operation
+        temp_file = self.manifest_file.with_suffix(self.manifest_file.suffix + ".tmp")
+        with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(manifest_data, f, indent=2)
+        
+        # Atomic rename
+        temp_file.replace(self.manifest_file)
+        logger.info(f"Saved manifest with {len(games)} games")
 
     def load_manifest(self) -> list[Game]:
-        """Load game manifest from disk.
+        """Load game manifest from disk with backward compatibility.
+
+        Supports both the old Python literal format (from gogrepoc.py) and
+        the new JSON format. Automatically migrates old format to new format
+        on first load.
 
         Returns:
             List of Game objects, empty list if file doesn't exist
 
         Raises:
             OSError: If file cannot be read
-            json.JSONDecodeError: If file contains invalid JSON
         """
         if not self.manifest_file.exists():
+            logger.debug("Manifest file does not exist")
             return []
 
-        with open(self.manifest_file, "r", encoding="utf-8") as f:
-            manifest_data = json.load(f)
+        try:
+            # Try loading as new JSON format first
+            with open(self.manifest_file, "r", encoding="utf-8") as f:
+                content = f.read()
+                
+            # Check if it's the new JSON format
+            if content.strip().startswith("{"):
+                manifest_data = json.loads(content)
+                
+                # Handle new format with version
+                if isinstance(manifest_data, dict) and "version" in manifest_data:
+                    logger.info(f"Loading manifest version {manifest_data.get('version')}")
+                    games_list = manifest_data.get("games", [])
+                # Handle old JSON format (list of games without version wrapper)
+                elif isinstance(manifest_data, list):
+                    logger.info("Loading legacy JSON manifest format")
+                    games_list = manifest_data
+                else:
+                    logger.error("Unknown JSON manifest format")
+                    return []
+                    
+                games = []
+                for game_dict in games_list:
+                    game = self._dict_to_game(game_dict)
+                    games.append(game)
+                
+                logger.info(f"Loaded {len(games)} games from JSON manifest")
+                return games
+            
+            # Try loading as old Python literal format
+            else:
+                logger.info("Detected old Python literal manifest format, migrating...")
+                games = self._load_old_manifest(content)
+                
+                # Automatically migrate to new format
+                if games:
+                    logger.info(f"Migrating {len(games)} games to new JSON format")
+                    self.save_manifest(games)
+                    logger.info("Migration complete")
+                
+                return games
+                
+        except json.JSONDecodeError as e:
+            # If JSON parsing fails, try old format
+            logger.warning(f"JSON parsing failed: {e}, attempting old format")
+            try:
+                with open(self.manifest_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                games = self._load_old_manifest(content)
+                
+                # Migrate to new format
+                if games:
+                    logger.info(f"Migrating {len(games)} games to new JSON format")
+                    self.save_manifest(games)
+                
+                return games
+            except Exception as e2:
+                logger.error(f"Failed to load manifest in any format: {e2}")
+                return []
+        except Exception as e:
+            logger.error(f"Unexpected error loading manifest: {e}")
+            return []
 
+    def _load_old_manifest(self, content: str) -> list[Game]:
+        """Load manifest from old Python literal format.
+
+        The old format used Python's pprint to save AttrDict objects.
+        This method parses that format and converts to Game objects.
+
+        Args:
+            content: Raw file content as string
+
+        Returns:
+            List of Game objects
+
+        Raises:
+            Exception: If parsing fails
+        """
+        import re
+        
+        # Remove comment line (e.g., "# 76 games")
+        content = re.sub(r'^#.*\n', '', content, flags=re.MULTILINE)
+        
+        # Fix AttrDict munging if present
+        content = re.sub(r'AttrDict\(\*\*', '', content)
+        content = re.sub(r'\)\)', ')', content)
+        
+        # Fix Python 2 long integers (e.g., 123L -> 123)
+        content = re.sub(r"'size': ([0-9]+)L,", r"'size': \1,", content)
+        
+        # Replace JSON null/true/false with Python None/True/False for eval
+        content = content.replace(': null,', ': None,')
+        content = content.replace(': null}', ': None}')
+        content = content.replace(': null]', ': None]')
+        content = content.replace(': true,', ': True,')
+        content = content.replace(': true}', ': True}')
+        content = content.replace(': true]', ': True]')
+        content = content.replace(': false,', ': False,')
+        content = content.replace(': false}', ': False}')
+        content = content.replace(': false]', ': False]')
+        
+        # Safely evaluate the Python literal
+        try:
+            # Use ast.literal_eval for safer evaluation
+            import ast
+            manifest_list = ast.literal_eval(content)
+        except (ValueError, SyntaxError):
+            # Fallback to eval if ast.literal_eval fails (for complex structures)
+            logger.warning("Using eval() for old manifest - this is less safe")
+            manifest_list = eval(content)
+        
+        # Convert to Game objects
         games = []
-        for game_dict in manifest_data:
-            game = Game(
-                id=game_dict["id"],
-                title=game_dict["title"],
-                folder_name=game_dict["folder_name"],
-                long_title=game_dict["long_title"],
-                downloads=[self._dict_to_download(d) for d in game_dict.get("downloads", [])],
-                galaxy_downloads=[
-                    self._dict_to_download(d) for d in game_dict.get("galaxy_downloads", [])
-                ],
-                shared_downloads=[
-                    self._dict_to_download(d) for d in game_dict.get("shared_downloads", [])
-                ],
-                extras=[self._dict_to_extra(e) for e in game_dict.get("extras", [])],
-                serials=game_dict.get("serials", {}),
-                changelog=game_dict.get("changelog"),
-                image_url=game_dict.get("image_url", ""),
-                bg_url=game_dict.get("bg_url", ""),
-                store_url=game_dict.get("store_url", ""),
-                has_updates=game_dict.get("has_updates", False),
-            )
-            games.append(game)
-
+        for item in manifest_list:
+            # Old format uses dict-like objects
+            if isinstance(item, dict):
+                game = self._migrate_old_game_dict(item)
+                if game:
+                    games.append(game)
+        
         return games
+
+    def _migrate_old_game_dict(self, old_dict: dict[str, Any]) -> Game | None:
+        """Migrate old manifest game dictionary to new Game object.
+
+        The old format has different field names and structures.
+        This method maps old fields to new Game model.
+
+        Args:
+            old_dict: Dictionary from old manifest format
+
+        Returns:
+            Game object or None if migration fails
+        """
+        try:
+            # Extract basic fields (old format may use different keys)
+            game_id = old_dict.get("id") or old_dict.get("_id_mirror")
+            title = old_dict.get("title") or old_dict.get("_title_mirror", "")
+            folder_name = old_dict.get("folder_name", title)
+            long_title = old_dict.get("long_title") or old_dict.get("_long_title_mirror", title)
+            
+            # Extract downloads
+            downloads = []
+            for d in old_dict.get("downloads", []):
+                download = self._migrate_old_download(d)
+                if download:
+                    downloads.append(download)
+            
+            # Extract galaxy downloads
+            galaxy_downloads = []
+            for d in old_dict.get("galaxy_downloads", []):
+                download = self._migrate_old_download(d)
+                if download:
+                    galaxy_downloads.append(download)
+            
+            # Extract shared downloads
+            shared_downloads = []
+            for d in old_dict.get("shared_downloads", []):
+                download = self._migrate_old_download(d)
+                if download:
+                    shared_downloads.append(download)
+            
+            # Extract extras
+            extras = []
+            for e in old_dict.get("extras", []):
+                extra = self._migrate_old_extra(e)
+                if extra:
+                    extras.append(extra)
+            
+            # Extract other fields
+            serials = old_dict.get("serials", {})
+            changelog = old_dict.get("changelog", "")
+            image_url = old_dict.get("image_url", "")
+            bg_url = old_dict.get("bg_url", "")
+            store_url = old_dict.get("store_url", "")
+            has_updates = old_dict.get("has_updates", False)
+            
+            return Game(
+                id=game_id,
+                title=title,
+                folder_name=folder_name,
+                long_title=long_title,
+                downloads=downloads,
+                galaxy_downloads=galaxy_downloads,
+                shared_downloads=shared_downloads,
+                extras=extras,
+                serials=serials,
+                changelog=changelog,
+                image_url=image_url,
+                bg_url=bg_url,
+                store_url=store_url,
+                has_updates=has_updates,
+            )
+        except Exception as e:
+            logger.error(f"Failed to migrate game: {e}")
+            return None
+
+    def _migrate_old_download(self, old_dict: dict[str, Any]) -> Download | None:
+        """Migrate old download dictionary to Download object.
+
+        Args:
+            old_dict: Dictionary from old manifest format
+
+        Returns:
+            Download object or None if migration fails
+        """
+        try:
+            from datetime import datetime
+            
+            # Old format may have nested structures
+            name = old_dict.get("name", "")
+            href = old_dict.get("href", "")
+            size = old_dict.get("size", 0)
+            
+            # MD5 might be in nested structure
+            md5 = old_dict.get("md5")
+            if not md5 and "gog_data" in old_dict:
+                gog_data = old_dict["gog_data"]
+                if isinstance(gog_data, dict) and "md5_xml" in gog_data:
+                    md5_xml = gog_data["md5_xml"]
+                    if isinstance(md5_xml, dict):
+                        md5 = md5_xml.get("md5")
+            
+            os_type = old_dict.get("os_type", old_dict.get("os", ""))
+            lang = old_dict.get("lang", old_dict.get("language", "en"))
+            version = old_dict.get("version", old_dict.get("ver"))
+            desc = old_dict.get("desc", old_dict.get("description", ""))
+            
+            # Parse date/updated field
+            updated = None
+            date_str = old_dict.get("updated") or old_dict.get("date")
+            if date_str:
+                try:
+                    if isinstance(date_str, str) and date_str:
+                        # Try ISO format first
+                        try:
+                            updated = datetime.fromisoformat(date_str)
+                        except ValueError:
+                            # Try other common formats
+                            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                                try:
+                                    updated = datetime.strptime(date_str, fmt)
+                                    break
+                                except ValueError:
+                                    continue
+                except Exception:
+                    pass
+            
+            verified = old_dict.get("verified", False)
+            
+            return Download(
+                name=name,
+                href=href,
+                size=size,
+                md5=md5,
+                os_type=os_type,
+                lang=lang,
+                version=version,
+                desc=desc,
+                updated=updated,
+                verified=verified,
+            )
+        except Exception as e:
+            logger.error(f"Failed to migrate download: {e}")
+            return None
+
+    def _migrate_old_extra(self, old_dict: dict[str, Any]) -> Extra | None:
+        """Migrate old extra dictionary to Extra object.
+
+        Args:
+            old_dict: Dictionary from old manifest format
+
+        Returns:
+            Extra object or None if migration fails
+        """
+        try:
+            from datetime import datetime
+            
+            name = old_dict.get("name", "")
+            href = old_dict.get("href", "")
+            size = old_dict.get("size", 0)
+            desc = old_dict.get("desc", old_dict.get("description", ""))
+            
+            # Parse date
+            updated = None
+            date_str = old_dict.get("updated") or old_dict.get("date")
+            if date_str:
+                try:
+                    if isinstance(date_str, str) and date_str:
+                        try:
+                            updated = datetime.fromisoformat(date_str)
+                        except ValueError:
+                            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                                try:
+                                    updated = datetime.strptime(date_str, fmt)
+                                    break
+                                except ValueError:
+                                    continue
+                except Exception:
+                    pass
+            
+            return Extra(
+                name=name,
+                href=href,
+                size=size,
+                desc=desc,
+                updated=updated,
+            )
+        except Exception as e:
+            logger.error(f"Failed to migrate extra: {e}")
+            return None
+
+    def _dict_to_game(self, data: dict[str, Any]) -> Game:
+        """Convert dictionary to Game object.
+
+        Args:
+            data: Dictionary containing game data
+
+        Returns:
+            Game object
+        """
+        return Game(
+            id=data["id"],
+            title=data["title"],
+            folder_name=data["folder_name"],
+            long_title=data["long_title"],
+            downloads=[self._dict_to_download(d) for d in data.get("downloads", [])],
+            galaxy_downloads=[
+                self._dict_to_download(d) for d in data.get("galaxy_downloads", [])
+            ],
+            shared_downloads=[
+                self._dict_to_download(d) for d in data.get("shared_downloads", [])
+            ],
+            extras=[self._dict_to_extra(e) for e in data.get("extras", [])],
+            serials=data.get("serials", {}),
+            changelog=data.get("changelog"),
+            image_url=data.get("image_url", ""),
+            bg_url=data.get("bg_url", ""),
+            store_url=data.get("store_url", ""),
+            has_updates=data.get("has_updates", False),
+        )
 
     def save_downloaded_games(self, downloaded_games: dict[int, Any]) -> None:
         """Save downloaded games tracking data to disk.

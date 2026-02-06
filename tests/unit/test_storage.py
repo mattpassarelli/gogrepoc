@@ -215,7 +215,9 @@ class TestManifestOperations:
         with open(storage.manifest_file, "r") as f:
             data = json.load(f)
 
-        assert data == []
+        assert data["version"] == 2
+        assert data["game_count"] == 0
+        assert data["games"] == []
 
     def test_save_manifest_single_game(self, storage: Storage, sample_game: Game):
         """Test saving a manifest with a single game."""
@@ -226,11 +228,13 @@ class TestManifestOperations:
         with open(storage.manifest_file, "r") as f:
             data = json.load(f)
 
-        assert len(data) == 1
-        assert data[0]["id"] == sample_game.id
-        assert data[0]["title"] == sample_game.title
-        assert len(data[0]["downloads"]) == 1
-        assert len(data[0]["extras"]) == 1
+        assert data["version"] == 2
+        assert data["game_count"] == 1
+        assert len(data["games"]) == 1
+        assert data["games"][0]["id"] == sample_game.id
+        assert data["games"][0]["title"] == sample_game.title
+        assert len(data["games"][0]["downloads"]) == 1
+        assert len(data["games"][0]["extras"]) == 1
 
     def test_load_manifest_empty(self, storage: Storage):
         """Test loading manifest when file doesn't exist."""
@@ -548,3 +552,372 @@ class TestStorageEdgeCases:
         assert len(reloaded_games) == 1
         assert reloaded_games[0].id == sample_game.id
         assert reloaded_games[0].title == sample_game.title
+
+
+class TestManifestBackwardCompatibility:
+    """Tests for backward compatibility with old manifest format."""
+
+    def test_load_old_python_literal_format(self, storage: Storage, tmp_path: Path):
+        """Test loading manifest in old Python literal format."""
+        # Create old format manifest (Python literal with pprint style)
+        old_manifest_content = """# 2 games
+[{'id': 1,
+  'title': 'test_game',
+  'folder_name': 'test_game',
+  'long_title': 'Test Game',
+  'downloads': [{'name': 'installer.exe',
+                 'href': '/download/1',
+                 'size': 1024000,
+                 'md5': 'd41d8cd98f00b204e9800998ecf8427e',
+                 'os_type': 'windows',
+                 'lang': 'en',
+                 'version': '1.0.0',
+                 'desc': 'Test Installer',
+                 'updated': '2024-01-01T00:00:00',
+                 'verified': False}],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': 'Initial release',
+  'image_url': 'https://example.com/image.jpg',
+  'bg_url': 'https://example.com/bg.jpg',
+  'store_url': 'https://www.gog.com/game/test_game',
+  'has_updates': False},
+ {'id': 2,
+  'title': 'test_game_2',
+  'folder_name': 'test_game_2',
+  'long_title': 'Test Game 2',
+  'downloads': [],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': None,
+  'image_url': '',
+  'bg_url': '',
+  'store_url': '',
+  'has_updates': True}]"""
+
+        # Write old format to file
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        # Load and verify
+        games = storage.load_manifest()
+
+        assert len(games) == 2
+        assert games[0].id == 1
+        assert games[0].title == "test_game"
+        assert len(games[0].downloads) == 1
+        assert games[1].id == 2
+        assert games[1].has_updates is True
+
+    def test_load_old_format_with_python2_long_integers(self, storage: Storage):
+        """Test loading old format with Python 2 long integers (123L)."""
+        old_manifest_content = """# 1 games
+[{'id': 1,
+  'title': 'test_game',
+  'folder_name': 'test_game',
+  'long_title': 'Test Game',
+  'downloads': [{'name': 'installer.exe',
+                 'href': '/download/1',
+                 'size': 1024000L,
+                 'md5': 'd41d8cd98f00b204e9800998ecf8427e',
+                 'os_type': 'windows',
+                 'lang': 'en',
+                 'version': '1.0.0',
+                 'desc': 'Test Installer',
+                 'updated': '2024-01-01T00:00:00',
+                 'verified': False}],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': None,
+  'image_url': '',
+  'bg_url': '',
+  'store_url': '',
+  'has_updates': False}]"""
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        games = storage.load_manifest()
+
+        assert len(games) == 1
+        assert games[0].downloads[0].size == 1024000
+
+    def test_load_old_format_with_mirror_fields(self, storage: Storage):
+        """Test loading old format with _mirror fields."""
+        old_manifest_content = """# 1 games
+[{'_id_mirror': 1901367087,
+  '_title_mirror': 'test_game',
+  '_long_title_mirror': 'Test Game Long Title',
+  'id': 1,
+  'title': 'test_game',
+  'folder_name': 'test_game',
+  'long_title': 'Test Game',
+  'downloads': [],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': '',
+  'image_url': '',
+  'bg_url': '',
+  'store_url': '',
+  'has_updates': False}]"""
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        games = storage.load_manifest()
+
+        assert len(games) == 1
+        assert games[0].id == 1
+        assert games[0].title == "test_game"
+
+    def test_load_old_format_with_nested_gog_data(self, storage: Storage):
+        """Test loading old format with nested gog_data structure."""
+        old_manifest_content = """# 1 games
+[{'id': 1,
+  'title': 'test_game',
+  'folder_name': 'test_game',
+  'long_title': 'Test Game',
+  'downloads': [{'name': 'installer.exe',
+                 'href': '/download/1',
+                 'size': 1024000,
+                 'os_type': 'windows',
+                 'lang': 'en',
+                 'version': '1.0.0',
+                 'desc': 'Test Installer',
+                 'updated': '2024-01-01T00:00:00',
+                 'verified': False,
+                 'gog_data': {'md5_xml': {'md5': 'abc123def456'}}}],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': None,
+  'image_url': '',
+  'bg_url': '',
+  'store_url': '',
+  'has_updates': False}]"""
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        games = storage.load_manifest()
+
+        assert len(games) == 1
+        assert games[0].downloads[0].md5 == "abc123def456"
+
+    def test_migration_creates_backup(self, storage: Storage):
+        """Test that migration creates a backup of old manifest."""
+        old_manifest_content = """# 1 games
+[{'id': 1,
+  'title': 'test_game',
+  'folder_name': 'test_game',
+  'long_title': 'Test Game',
+  'downloads': [],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': None,
+  'image_url': '',
+  'bg_url': '',
+  'store_url': '',
+  'has_updates': False}]"""
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        # Load triggers migration
+        games = storage.load_manifest()
+
+        # Check backup was created
+        backup_file = storage.manifest_file.with_suffix(storage.manifest_file.suffix + ".bak")
+        assert backup_file.exists()
+
+    def test_migration_converts_to_json(self, storage: Storage):
+        """Test that migration converts old format to new JSON format."""
+        old_manifest_content = """# 1 games
+[{'id': 1,
+  'title': 'test_game',
+  'folder_name': 'test_game',
+  'long_title': 'Test Game',
+  'downloads': [],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': None,
+  'image_url': '',
+  'bg_url': '',
+  'store_url': '',
+  'has_updates': False}]"""
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        # Load triggers migration
+        games = storage.load_manifest()
+
+        # Verify file is now JSON
+        with open(storage.manifest_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        assert content.strip().startswith("{")
+        data = json.loads(content)
+        assert "version" in data
+        assert data["version"] == 2
+        assert "games" in data
+
+    def test_load_new_json_format_with_version(self, storage: Storage, sample_game: Game):
+        """Test loading new JSON format with version wrapper."""
+        # Save in new format
+        storage.save_manifest([sample_game])
+
+        # Verify it has version wrapper
+        with open(storage.manifest_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert "version" in data
+        assert "game_count" in data
+        assert "games" in data
+
+        # Load and verify
+        games = storage.load_manifest()
+        assert len(games) == 1
+        assert games[0].id == sample_game.id
+
+    def test_load_legacy_json_format_without_version(self, storage: Storage):
+        """Test loading legacy JSON format (list without version wrapper)."""
+        # Create legacy JSON format (just a list)
+        legacy_data = [
+            {
+                "id": 1,
+                "title": "test_game",
+                "folder_name": "test_game",
+                "long_title": "Test Game",
+                "downloads": [],
+                "galaxy_downloads": [],
+                "shared_downloads": [],
+                "extras": [],
+                "serials": {},
+                "changelog": None,
+                "image_url": "",
+                "bg_url": "",
+                "store_url": "",
+                "has_updates": False,
+            }
+        ]
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            json.dump(legacy_data, f)
+
+        # Load and verify
+        games = storage.load_manifest()
+        assert len(games) == 1
+        assert games[0].id == 1
+
+    def test_old_format_with_alternative_field_names(self, storage: Storage):
+        """Test loading old format with alternative field names (os vs os_type, etc)."""
+        old_manifest_content = """# 1 games
+[{'id': 1,
+  'title': 'test_game',
+  'folder_name': 'test_game',
+  'long_title': 'Test Game',
+  'downloads': [{'name': 'installer.exe',
+                 'href': '/download/1',
+                 'size': 1024000,
+                 'os': 'windows',
+                 'language': 'en',
+                 'ver': '1.0.0',
+                 'description': 'Test Installer',
+                 'date': '2024-01-01 00:00:00',
+                 'verified': False}],
+  'galaxy_downloads': [],
+  'shared_downloads': [],
+  'extras': [],
+  'serials': {},
+  'changelog': None,
+  'image_url': '',
+  'bg_url': '',
+  'store_url': '',
+  'has_updates': False}]"""
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        games = storage.load_manifest()
+
+        assert len(games) == 1
+        download = games[0].downloads[0]
+        assert download.os_type == "windows"
+        assert download.lang == "en"
+        assert download.version == "1.0.0"
+        assert download.desc == "Test Installer"
+
+    def test_old_format_with_missing_optional_fields(self, storage: Storage):
+        """Test loading old format with missing optional fields."""
+        old_manifest_content = """# 1 games
+[{'id': 1,
+  'title': 'test_game',
+  'downloads': [{'name': 'installer.exe',
+                 'href': '/download/1',
+                 'size': 1024000}]}]"""
+
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write(old_manifest_content)
+
+        games = storage.load_manifest()
+
+        assert len(games) == 1
+        assert games[0].id == 1
+        assert games[0].title == "test_game"
+        # Check defaults are applied
+        assert games[0].folder_name == "test_game"
+        assert len(games[0].downloads) == 1
+
+    def test_corrupted_manifest_returns_empty_list(self, storage: Storage):
+        """Test that corrupted manifest returns empty list instead of crashing."""
+        # Write completely invalid content
+        with open(storage.manifest_file, "w", encoding="utf-8") as f:
+            f.write("This is not valid Python or JSON!")
+
+        games = storage.load_manifest()
+        assert games == []
+
+    def test_save_manifest_creates_backup(self, storage: Storage, sample_game: Game):
+        """Test that saving manifest creates backup of previous version."""
+        # Save first version
+        storage.save_manifest([sample_game])
+
+        # Modify and save again
+        sample_game.title = "modified_title"
+        storage.save_manifest([sample_game])
+
+        # Check backup exists
+        backup_file = storage.manifest_file.with_suffix(storage.manifest_file.suffix + ".bak")
+        assert backup_file.exists()
+
+        # Verify backup contains old version
+        with open(backup_file, "r", encoding="utf-8") as f:
+            backup_data = json.load(f)
+
+        # Old version should have original title
+        assert backup_data["games"][0]["title"] == "test_game"
+
+    def test_save_manifest_atomic_write(self, storage: Storage, sample_game: Game):
+        """Test that save_manifest uses atomic write (temp file + rename)."""
+        storage.save_manifest([sample_game])
+
+        # Temp file should not exist after successful save
+        temp_file = storage.manifest_file.with_suffix(storage.manifest_file.suffix + ".tmp")
+        assert not temp_file.exists()
+
+        # Manifest file should exist
+        assert storage.manifest_file.exists()
