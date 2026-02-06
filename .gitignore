@@ -109,3 +109,6 @@ dist/
 
 # Kiro
 .kiro/
+
+# Mypy
+py.typed
