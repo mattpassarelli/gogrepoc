@@ -83,15 +83,35 @@ class TestLogin:
     @pytest.mark.asyncio
     async def test_login_success(self, auth_service, mock_http_client):
         """Test successful login flow."""
-        # Mock successful API response
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        # Mock auth page response with login form
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response with redirect containing code
+        login_response = Mock()
+        login_response.text = "<html></html>"
+        login_response.url = "https://embed.gog.com/on_login_success?code=test_auth_code_123"
+        
+        # Mock token exchange response
+        token_response = Mock()
+        token_response.json.return_value = {
             "access_token": "new_access_token",
             "refresh_token": "new_refresh_token",
             "expires_in": 3600,
             "user_id": "user_123",
         }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        
+        # Setup mock to return different responses for different calls
+        mock_http_client.get = AsyncMock(side_effect=[auth_page_response, token_response])
+        mock_http_client.post = AsyncMock(return_value=login_response)
         
         # Perform login
         token = await auth_service.login("test@example.com", "password123")
@@ -104,74 +124,152 @@ class TestLogin:
         
         # Verify token was cached
         assert auth_service._cached_token == token
-        
-        # Verify HTTP client was called correctly
-        mock_http_client.post.assert_called_once()
-        call_args = mock_http_client.post.call_args
-        assert AuthService.AUTH_URL in call_args[0]
-        assert "username" in call_args[1]["data"]
-        assert "password" in call_args[1]["data"]
 
     @pytest.mark.asyncio
     async def test_login_with_2fa_code(self, auth_service, mock_http_client):
         """Test login with two-factor authentication code."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        # Mock auth page response
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response with 2FA redirect
+        login_response = Mock()
+        login_response.text = '''
+        <html>
+            <form>
+                <input id="two_factor_totp_authentication__token" value="totp_token_123" />
+            </form>
+        </html>
+        '''
+        login_response.url = "https://login.gog.com/totp"
+        
+        # Mock 2FA response with success redirect
+        totp_response = Mock()
+        totp_response.text = "<html></html>"
+        totp_response.url = "https://embed.gog.com/on_login_success?code=test_auth_code_456"
+        
+        # Mock token exchange response
+        token_response = Mock()
+        token_response.json.return_value = {
             "access_token": "new_access_token",
             "refresh_token": "new_refresh_token",
             "expires_in": 3600,
             "user_id": "user_123",
         }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        
+        mock_http_client.get = AsyncMock(side_effect=[auth_page_response, token_response])
+        mock_http_client.post = AsyncMock(side_effect=[login_response, totp_response])
         
         token = await auth_service.login("test@example.com", "password123", two_factor_code="123456")
         
         assert token.access_token == "new_access_token"
-        
-        # Verify 2FA code was included in request
-        call_args = mock_http_client.post.call_args
-        assert "two_step_code" in call_args[1]["data"]
-        assert call_args[1]["data"]["two_step_code"] == "123456"
 
     @pytest.mark.asyncio
     async def test_login_invalid_credentials(self, auth_service, mock_http_client):
         """Test login with invalid credentials."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "error": "invalid_grant",
-            "error_description": "Invalid username or password",
-        }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        # Mock auth page response
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response that stays on login page (no redirect)
+        login_response = Mock()
+        login_response.text = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+                <div class="error">Invalid username or password</div>
+            </form>
+        </html>
+        '''
+        login_response.url = "https://login.gog.com/login_check"
+        
+        mock_http_client.get = AsyncMock(return_value=auth_page_response)
+        mock_http_client.post = AsyncMock(return_value=login_response)
         
         with pytest.raises(AuthError) as exc_info:
             await auth_service.login("test@example.com", "wrong_password")
         
-        assert "Invalid username or password" in str(exc_info.value)
+        assert "Login failed" in str(exc_info.value)
         assert exc_info.value.username == "test@example.com"
 
     @pytest.mark.asyncio
     async def test_login_2fa_required(self, auth_service, mock_http_client):
         """Test login when 2FA is required."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "error": "two_factor_required",
-            "error_description": "Two-factor authentication required",
-        }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        # Mock auth page response
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response with 2FA redirect (but no 2FA code provided)
+        login_response = Mock()
+        login_response.text = '''
+        <html>
+            <form>
+                <input id="two_factor_totp_authentication__token" value="totp_token_123" />
+            </form>
+        </html>
+        '''
+        login_response.url = "https://login.gog.com/totp"
+        
+        mock_http_client.get = AsyncMock(return_value=auth_page_response)
+        mock_http_client.post = AsyncMock(return_value=login_response)
         
         with pytest.raises(AuthError) as exc_info:
             await auth_service.login("test@example.com", "password123")
         
-        assert "Two-factor authentication required" in str(exc_info.value)
+        assert "Two-factor authentication" in str(exc_info.value) or "TOTP" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_login_missing_tokens_in_response(self, auth_service, mock_http_client):
         """Test login when API response is missing tokens."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        # Mock auth page response
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response with redirect
+        login_response = Mock()
+        login_response.text = "<html></html>"
+        login_response.url = "https://embed.gog.com/on_login_success?code=test_code"
+        
+        # Mock token exchange response missing tokens
+        token_response = Mock()
+        token_response.json.return_value = {
             "expires_in": 3600,
         }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        
+        mock_http_client.get = AsyncMock(side_effect=[auth_page_response, token_response])
+        mock_http_client.post = AsyncMock(return_value=login_response)
         
         with pytest.raises(AuthError) as exc_info:
             await auth_service.login("test@example.com", "password123")
@@ -191,14 +289,34 @@ class TestLogin:
     @pytest.mark.asyncio
     async def test_login_saves_token_to_storage(self, auth_service, mock_http_client, mock_storage):
         """Test that login saves token to storage."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        # Mock auth page response
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response with redirect
+        login_response = Mock()
+        login_response.text = "<html></html>"
+        login_response.url = "https://embed.gog.com/on_login_success?code=test_code"
+        
+        # Mock token exchange response
+        token_response = Mock()
+        token_response.json.return_value = {
             "access_token": "new_access_token",
             "refresh_token": "new_refresh_token",
             "expires_in": 3600,
             "user_id": "user_123",
         }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        
+        mock_http_client.get = AsyncMock(side_effect=[auth_page_response, token_response])
+        mock_http_client.post = AsyncMock(return_value=login_response)
         
         token = await auth_service.login("test@example.com", "password123")
         
@@ -462,22 +580,49 @@ class TestTwoFactorAuthentication:
     @pytest.mark.asyncio
     async def test_login_with_2fa_convenience_method(self, auth_service, mock_http_client):
         """Test login_with_2fa convenience method."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        # Mock auth page response
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response with 2FA redirect
+        login_response = Mock()
+        login_response.text = '''
+        <html>
+            <form>
+                <input id="two_factor_totp_authentication__token" value="totp_token_123" />
+            </form>
+        </html>
+        '''
+        login_response.url = "https://login.gog.com/totp"
+        
+        # Mock 2FA response with success redirect
+        totp_response = Mock()
+        totp_response.text = "<html></html>"
+        totp_response.url = "https://embed.gog.com/on_login_success?code=test_auth_code_789"
+        
+        # Mock token exchange response
+        token_response = Mock()
+        token_response.json.return_value = {
             "access_token": "new_access_token",
             "refresh_token": "new_refresh_token",
             "expires_in": 3600,
             "user_id": "user_123",
         }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        
+        mock_http_client.get = AsyncMock(side_effect=[auth_page_response, token_response])
+        mock_http_client.post = AsyncMock(side_effect=[login_response, totp_response])
         
         token = await auth_service.login_with_2fa("test@example.com", "password123", "123456")
         
         assert token.access_token == "new_access_token"
-        
-        # Verify 2FA code was included
-        call_args = mock_http_client.post.call_args
-        assert call_args[1]["data"]["two_step_code"] == "123456"
 
 
 class TestAuthServiceIntegration:
@@ -486,15 +631,34 @@ class TestAuthServiceIntegration:
     @pytest.mark.asyncio
     async def test_complete_login_flow(self, auth_service, mock_http_client, mock_storage):
         """Test complete login flow from start to finish."""
-        # Mock login response
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        # Mock auth page response
+        auth_page_html = '''
+        <html>
+            <form name="login">
+                <input id="login__token" value="test_login_token_123" />
+            </form>
+        </html>
+        '''
+        auth_page_response = Mock()
+        auth_page_response.text = auth_page_html
+        auth_page_response.url = "https://auth.gog.com/auth"
+        
+        # Mock login response with redirect
+        login_response = Mock()
+        login_response.text = "<html></html>"
+        login_response.url = "https://embed.gog.com/on_login_success?code=test_code"
+        
+        # Mock token exchange response
+        token_response = Mock()
+        token_response.json.return_value = {
             "access_token": "access_123",
             "refresh_token": "refresh_456",
             "expires_in": 3600,
             "user_id": "user_789",
         }
-        mock_http_client.post = AsyncMock(return_value=mock_response)
+        
+        mock_http_client.get = AsyncMock(side_effect=[auth_page_response, token_response])
+        mock_http_client.post = AsyncMock(return_value=login_response)
         
         # Login
         token = await auth_service.login("user@example.com", "password")

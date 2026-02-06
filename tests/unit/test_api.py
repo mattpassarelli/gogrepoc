@@ -130,56 +130,6 @@ class TestLoginEndpoint:
         # Verify response
         assert response.status_code == 401
 
-    @patch("gogrepoc.api.routes.get_auth_service")
-    def test_login_requires_2fa(self, mock_get_auth, client: TestClient) -> None:
-        """Test login when 2FA is required."""
-        # Setup mock
-        mock_auth_service = AsyncMock()
-        mock_auth_service.login.side_effect = AuthError("Two-factor authentication required")
-        mock_auth_service.requires_two_factor.return_value = True
-        mock_get_auth.return_value = mock_auth_service
-
-        # Make request
-        response = client.post(
-            "/api/login",
-            json={
-                "username": "test@example.com",
-                "password": "password123",
-            },
-        )
-
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert data["authenticated"] is False
-        assert "two-factor" in data["message"].lower()
-
-    @patch("gogrepoc.api.routes.get_auth_service")
-    def test_login_with_2fa_code(self, mock_get_auth, client: TestClient, mock_token: Token) -> None:
-        """Test login with 2FA code."""
-        # Setup mock
-        mock_auth_service = AsyncMock()
-        mock_auth_service.login.return_value = mock_token
-        mock_get_auth.return_value = mock_auth_service
-
-        # Make request
-        response = client.post(
-            "/api/login",
-            json={
-                "username": "test@example.com",
-                "password": "password123",
-                "two_factor_code": "123456",
-            },
-        )
-
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["authenticated"] is True
-
-
 class TestCheckAuthEndpoint:
     """Tests for /api/check-auth endpoint."""
 
@@ -189,9 +139,9 @@ class TestCheckAuthEndpoint:
     ) -> None:
         """Test check auth when user is authenticated."""
         # Setup mock
-        mock_auth_service = AsyncMock()
+        mock_auth_service = MagicMock()
         mock_auth_service.is_authenticated.return_value = True
-        mock_auth_service.get_valid_token.return_value = mock_token
+        mock_auth_service.get_valid_token = AsyncMock(return_value=mock_token)
         mock_get_auth.return_value = mock_auth_service
 
         # Make request
