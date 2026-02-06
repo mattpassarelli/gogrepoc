@@ -52,6 +52,118 @@ class AuthService:
         self.http_client = http_client
         self._cached_token: Optional[Token] = None
 
+    def get_auth_url(self) -> str:
+        """Generate GOG OAuth authorization URL for browser-based login.
+
+        This URL should be opened in a browser to allow the user to authenticate
+        using any GOG-supported method (email/password, Google, Discord, etc.).
+        After successful authentication, the user will be redirected to a URL
+        containing an authorization code.
+
+        Returns:
+            Complete OAuth authorization URL for GOG login
+
+        Example:
+            >>> auth_service = AuthService(storage, http_client)
+            >>> url = auth_service.get_auth_url()
+            >>> # Open url in browser, user logs in, gets redirected with code
+        """
+        from urllib.parse import urlencode
+
+        params = {
+            'client_id': self.CLIENT_ID,
+            'redirect_uri': self.REDIRECT_URI,
+            'response_type': 'code',
+            'layout': 'client2'
+        }
+
+        return f"{self.AUTH_URL}?{urlencode(params)}"
+
+    async def login_with_code(self, auth_code: str) -> Token:
+        """Exchange OAuth authorization code for access/refresh tokens.
+
+        This method takes the authorization code obtained from the browser-based
+        OAuth flow and exchanges it with GOG's token endpoint to get access and
+        refresh tokens. The tokens are then stored for future use.
+
+        Args:
+            auth_code: Authorization code from OAuth redirect URL
+
+        Returns:
+            Token object containing access and refresh tokens
+
+        Raises:
+            AuthError: If code exchange fails (invalid code, network error, etc.)
+
+        Example:
+            >>> # After user logs in via browser and provides redirect URL
+            >>> code = extract_code_from_url(redirect_url)
+            >>> token = await auth_service.login_with_code(code)
+        """
+        import time
+
+        logger.info("Exchanging authorization code for access token")
+
+        try:
+            # Prepare token exchange request
+            token_start = time.time()
+            token_params = {
+                'client_id': self.CLIENT_ID,
+                'client_secret': self.CLIENT_SECRET,
+                'grant_type': 'authorization_code',
+                'code': auth_code,
+                'redirect_uri': self.REDIRECT_URI
+            }
+
+            # Exchange code for tokens
+            response = await self.http_client.get(
+                self.TOKEN_URL,
+                params=token_params
+            )
+
+            # Parse response
+            token_json = response.json()
+
+            # Check for errors
+            if "error" in token_json:
+                error_msg = token_json.get("error_description", token_json["error"])
+                raise AuthError(f"Token exchange failed: {error_msg}")
+
+            # Extract token information
+            access_token = token_json.get("access_token")
+            refresh_token = token_json.get("refresh_token")
+            expires_in = token_json.get("expires_in", 3600)
+            user_id = token_json.get("user_id")
+
+            if not access_token or not refresh_token:
+                raise AuthError("Invalid token response from GOG API - missing tokens")
+
+            # Calculate expiration time
+            expires_at = datetime.fromtimestamp(token_start + expires_in)
+
+            # Create token object
+            token = Token(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                user_id=user_id,
+            )
+
+            # Store token
+            self.storage.save_token(token)
+            self._cached_token = token
+
+            logger.info(f"OAuth login successful for user: {user_id}")
+            return token
+
+        except AuthError:
+            # Re-raise AuthError as-is
+            raise
+        except Exception as e:
+            # Wrap other exceptions in AuthError
+            logger.error(f"OAuth token exchange failed: {e}")
+            raise AuthError(f"Failed to exchange authorization code: {str(e)}") from e
+
 
     async def login(self, username: str, password: str, two_factor_code: Optional[str] = None) -> Token:
         """Authenticate with GOG and obtain access token.
