@@ -69,16 +69,51 @@ function App() {
   const [compressDownloads, setCompressDownloads] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedGamesToAdd, setSelectedGamesToAdd] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterOS, setFilterOS] = useState("all");
+  const [filterLang, setFilterLang] = useState("all");
+  const [selectedGameForDetails, setSelectedGameForDetails] = useState(null);
+  const [showGameDetailsModal, setShowGameDetailsModal] = useState(false);
 
   // Check authentication and load games list on component mount
   useEffect(() => {
     checkAuth();
+    
+    // Load settings from localStorage
+    const savedSavedir = localStorage.getItem("savedir");
+    const savedCompress = localStorage.getItem("compressDownloads");
+    const savedFilterOS = localStorage.getItem("filterOS");
+    const savedFilterLang = localStorage.getItem("filterLang");
+    
+    if (savedSavedir) setSavedir(savedSavedir);
+    if (savedCompress) setCompressDownloads(savedCompress === "true");
+    if (savedFilterOS) setFilterOS(savedFilterOS);
+    if (savedFilterLang) setFilterLang(savedFilterLang);
   }, []);
+
+  // Save settings to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem("savedir", savedir);
+  }, [savedir]);
+
+  useEffect(() => {
+    localStorage.setItem("compressDownloads", compressDownloads.toString());
+  }, [compressDownloads]);
+
+  useEffect(() => {
+    localStorage.setItem("filterOS", filterOS);
+  }, [filterOS]);
+
+  useEffect(() => {
+    localStorage.setItem("filterLang", filterLang);
+  }, [filterLang]);
 
   const checkAuth = async () => {
     try {
-      const response = await axios.get("/check-auth");
-      if (response.data.isAuthenticated) {
+      const response = await axios.get("/api/check-auth");
+      if (response.data.authenticated) {
         setIsAuthenticated(true);
         fetchGames();
       }
@@ -90,13 +125,22 @@ function App() {
 
   const fetchGames = async () => {
     try {
-      const response = await axios.get("/manifest");
-      setAvailableGames(response.data.available_games);
-      setDownloadedGames(response.data.downloaded_games || []);
+      setIsLoading(true);
+      const response = await axios.get("/api/manifest");
+      // New API returns games array with total_count
+      const allGames = response.data.games || [];
+      
+      // Separate downloaded games from available games
+      // For now, we'll need to track downloaded games separately
+      // The manifest endpoint returns all games
+      setAvailableGames(allGames);
+      setDownloadedGames([]); // Will be populated from storage
       setSelectedToDownloadGames([]);
       setGamesToDownload([]);
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to load games");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -138,12 +182,17 @@ function App() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setError(null);
+    setMessage(null);
     try {
-      const response = await axios.post("/login", { username, password });
-      setMessage(response.data.message);
-      setError(null);
-      // After successful login, check auth status and fetch games
-      await checkAuth();
+      const response = await axios.post("/api/login", { username, password });
+      if (response.data.success) {
+        setMessage(response.data.message);
+        // After successful login, check auth status and fetch games
+        await checkAuth();
+      } else {
+        setError(response.data.message || "Login failed");
+      }
     } catch (err) {
       setError(err.response?.data?.detail || "Login failed");
     }
@@ -151,24 +200,28 @@ function App() {
 
   const handleUpdate = async () => {
     try {
-      setMessage("Updating game list. Please watch the console for details...");
-      const response = await axios.post("/update", {
-        os_list: ["windows"], // You might want to make this configurable
-        lang_list: ["en"],
+      setIsUpdating(true);
+      setMessage("Updating game list. Please wait...");
+      setError(null);
+      const response = await axios.post("/api/update", {
+        os_types: ["windows"], // You might want to make this configurable
+        languages: ["en"],
       });
       setMessage(response.data.message);
       fetchGames(); // Refresh the games list
     } catch (err) {
       setError(err.response?.data?.detail || "Update failed");
+    } finally {
+      setIsUpdating(false);
     }
   };
 
   const handleAddWithoutDownload = async () => {
     try {
-      const selectedIds = selectedGamesToAdd.map((game) => game.id.toString());
-      const response = await axios.post("/add_without_download", {
-        ids: selectedIds,
-        savedir: savedir,
+      const selectedIds = selectedGamesToAdd.map((game) => game.id);
+      const response = await axios.post("/api/add_without_download", {
+        game_ids: selectedIds,
+        save_dir: savedir,
       });
       setMessage(response.data.message);
       fetchGames(); // Refresh the games list
@@ -182,24 +235,136 @@ function App() {
   const handleDownload = async () => {
     try {
       setDownloading(true);
-      setMessage("Starting download. Please watch the console for details...");
+      setMessage("Starting download...");
+      setError(null);
 
-      const selectedIds = gamesToDownload.map((game) => game.id.toString());
+      const selectedIds = gamesToDownload.map((game) => game.id);
 
-      const response = await axios.post("/download", {
-        savedir: savedir,
-        os_list: ["windows"],
-        lang_list: ["en"],
-        ids: selectedIds,
-        compress_downloads: compressDownloads,
+      const response = await axios.post("/api/download", {
+        save_dir: savedir,
+        os_types: ["windows"],
+        languages: ["en"],
+        game_ids: selectedIds,
+        compress: compressDownloads,
       });
-      setMessage(response.data.message);
+      
+      if (response.data.success && response.data.task_id) {
+        setMessage("Download started. Tracking progress...");
+        // Start listening to progress updates via SSE
+        listenToDownloadProgress(response.data.task_id);
+      } else {
+        setError("Failed to start download");
+        setDownloading(false);
+      }
     } catch (err) {
       setError(err.response?.data?.detail || "Download failed");
-    } finally {
       setDownloading(false);
-      fetchGames();
     }
+  };
+
+  const listenToDownloadProgress = (taskId) => {
+    const eventSource = new EventSource(`${apiUrl}/api/download-progress/${taskId}`);
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const progress = JSON.parse(event.data);
+        
+        // Update UI with progress information
+        if (progress.current_game) {
+          setMessage(
+            `Downloading: ${progress.current_game} - ${progress.progress_percent.toFixed(1)}%`
+          );
+        }
+        
+        // Check if download is complete or failed
+        if (progress.status === "completed") {
+          setMessage("Download completed successfully!");
+          setDownloading(false);
+          eventSource.close();
+          fetchGames(); // Refresh games list
+        } else if (progress.status === "failed") {
+          setError(progress.error || "Download failed");
+          setDownloading(false);
+          eventSource.close();
+        }
+      } catch (err) {
+        console.error("Error parsing progress data:", err);
+      }
+    };
+    
+    eventSource.onerror = (err) => {
+      console.error("SSE error:", err);
+      setError("Lost connection to download progress");
+      setDownloading(false);
+      eventSource.close();
+    };
+  };
+
+  // Filter games based on search term and filters
+  const getFilteredGames = (games) => {
+    return games.filter((game) => {
+      // Search filter
+      const matchesSearch = game.title
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase());
+      
+      // OS filter (check if game has downloads for selected OS)
+      const matchesOS =
+        filterOS === "all" ||
+        game.downloads.some((d) => d.os_type === filterOS);
+      
+      // Language filter (check if game has downloads for selected language)
+      const matchesLang =
+        filterLang === "all" ||
+        game.downloads.some((d) => d.lang === filterLang);
+      
+      return matchesSearch && matchesOS && matchesLang;
+    });
+  };
+
+  // Calculate total download size for selected games
+  const calculateTotalSize = (games) => {
+    let totalBytes = 0;
+    games.forEach((game) => {
+      game.downloads.forEach((download) => {
+        totalBytes += download.size || 0;
+      });
+      game.extras.forEach((extra) => {
+        totalBytes += extra.size || 0;
+      });
+    });
+    return totalBytes;
+  };
+
+  // Format bytes to human-readable size
+  const formatBytes = (bytes) => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
+  };
+
+  // Calculate estimated download time (assuming 10 MB/s average speed)
+  const calculateEstimatedTime = (bytes) => {
+    const avgSpeedBytesPerSec = 10 * 1024 * 1024; // 10 MB/s
+    const seconds = bytes / avgSpeedBytesPerSec;
+    
+    if (seconds < 60) {
+      return `${Math.round(seconds)} seconds`;
+    } else if (seconds < 3600) {
+      return `${Math.round(seconds / 60)} minutes`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.round((seconds % 3600) / 60);
+      return `${hours}h ${minutes}m`;
+    }
+  };
+
+  // Show game details modal
+  const showGameDetails = (game) => {
+    setSelectedGameForDetails(game);
+    setShowGameDetailsModal(true);
   };
 
   useEffect(() => {
@@ -252,39 +417,107 @@ function App() {
       )}
       {isAuthenticated && (
         <>
+          {/* Search and Filter Controls */}
+          <Row className="mt-3 mb-3">
+            <Col md={4}>
+              <Form.Group>
+                <Form.Label>Search Games</Form.Label>
+                <Form.Control
+                  type="text"
+                  placeholder="Search by title..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={3}>
+              <Form.Group>
+                <Form.Label>Filter by OS</Form.Label>
+                <Form.Select
+                  value={filterOS}
+                  onChange={(e) => setFilterOS(e.target.value)}
+                >
+                  <option value="all">All OS</option>
+                  <option value="windows">Windows</option>
+                  <option value="linux">Linux</option>
+                  <option value="mac">Mac</option>
+                </Form.Select>
+              </Form.Group>
+            </Col>
+            <Col md={3}>
+              <Form.Group>
+                <Form.Label>Filter by Language</Form.Label>
+                <Form.Select
+                  value={filterLang}
+                  onChange={(e) => setFilterLang(e.target.value)}
+                >
+                  <option value="all">All Languages</option>
+                  <option value="en">English</option>
+                  <option value="de">German</option>
+                  <option value="fr">French</option>
+                  <option value="es">Spanish</option>
+                </Form.Select>
+              </Form.Group>
+            </Col>
+            <Col md={2} className="d-flex align-items-end">
+              <Button
+                onClick={() => {
+                  setSearchTerm("");
+                  setFilterOS("all");
+                  setFilterLang("all");
+                }}
+                variant="secondary"
+                className="w-100"
+              >
+                Clear Filters
+              </Button>
+            </Col>
+          </Row>
+
           <Row className="mt-4">
             <Col>
-              <h4>{`Available Games (${availableGames.length})`}</h4>
-              <ListGroup style={{ height: "400px", overflow: "auto" }}>
-                {availableGames.map((game) => (
-                  <ListGroup.Item
-                    key={game.id}
-                    active={selectedAvailableGames.some(
-                      (selected) => selected.id === game.id
-                    )}
-                    action
-                    onClick={() => {
-                      const isSelected = selectedAvailableGames.some(
+              <h4>{`Available Games (${getFilteredGames(availableGames).length})`}</h4>
+              {isLoading ? (
+                <div className="text-center p-4">
+                  <div className="spinner-border text-primary" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </div>
+                  <p className="mt-2">Loading games...</p>
+                </div>
+              ) : (
+                <ListGroup style={{ height: "400px", overflow: "auto" }}>
+                  {getFilteredGames(availableGames).map((game) => (
+                    <ListGroup.Item
+                      key={game.id}
+                      active={selectedAvailableGames.some(
                         (selected) => selected.id === game.id
-                      );
-                      if (isSelected) {
-                        setSelectedAvailableGames(
-                          selectedAvailableGames.filter(
-                            (selected) => selected.id !== game.id
-                          )
+                      )}
+                      action
+                      onClick={() => {
+                        const isSelected = selectedAvailableGames.some(
+                          (selected) => selected.id === game.id
                         );
-                      } else {
-                        setSelectedAvailableGames([
-                          ...selectedAvailableGames,
-                          game,
-                        ]);
-                      }
-                    }}
-                  >
-                    {game.title}
-                  </ListGroup.Item>
-                ))}
-              </ListGroup>
+                        if (isSelected) {
+                          setSelectedAvailableGames(
+                            selectedAvailableGames.filter(
+                              (selected) => selected.id !== game.id
+                            )
+                          );
+                        } else {
+                          setSelectedAvailableGames([
+                            ...selectedAvailableGames,
+                            game,
+                          ]);
+                        }
+                      }}
+                      onDoubleClick={() => showGameDetails(game)}
+                      title="Double-click to view details"
+                    >
+                      {game.title}
+                    </ListGroup.Item>
+                  ))}
+                </ListGroup>
+              )}
             </Col>
 
             <Col
@@ -444,8 +677,19 @@ function App() {
 
           <Row className="mt-4">
             <div style={{ display: "flex", justifyContent: "space-evenly" }}>
-              <Button onClick={handleUpdate} variant="info">
-                Update List
+              <Button 
+                onClick={handleUpdate} 
+                variant="info"
+                disabled={isUpdating}
+              >
+                {isUpdating ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                    Updating...
+                  </>
+                ) : (
+                  "Update List"
+                )}
               </Button>
               <div className="d-flex align-items-center gap-2">
                 <span>Download Path:</span>
@@ -460,12 +704,25 @@ function App() {
               </div>
               <div>
                 <div className="d-flex flex-column gap-2">
+                  {gamesToDownload.length > 0 && (
+                    <div className="text-muted small mb-2">
+                      <div>Total Size: {formatBytes(calculateTotalSize(gamesToDownload))}</div>
+                      <div>Est. Time: {calculateEstimatedTime(calculateTotalSize(gamesToDownload))}</div>
+                    </div>
+                  )}
                   <Button
                     onClick={handleDownload}
                     variant="success"
-                    disabled={downloading}
+                    disabled={downloading || gamesToDownload.length === 0}
                   >
-                    {downloading ? "Downloading..." : "Download Games"}
+                    {downloading ? (
+                      <>
+                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        Downloading...
+                      </>
+                    ) : (
+                      `Download Games (${gamesToDownload.length})`
+                    )}
                   </Button>
                   <Form.Check
                     type="checkbox"
@@ -480,6 +737,155 @@ function App() {
           </Row> 
         </>
       )}
+
+      {/* Game Details Modal */}
+      <Modal
+        show={showGameDetailsModal}
+        onHide={() => {
+          setShowGameDetailsModal(false);
+          setSelectedGameForDetails(null);
+        }}
+        size="lg"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>
+            {selectedGameForDetails?.title || "Game Details"}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {selectedGameForDetails && (
+            <>
+              {/* Game Images */}
+              {selectedGameForDetails.image_url && (
+                <div className="text-center mb-3">
+                  <img
+                    src={selectedGameForDetails.image_url}
+                    alt={selectedGameForDetails.title}
+                    style={{ maxWidth: "100%", maxHeight: "300px" }}
+                    onError={(e) => {
+                      e.target.style.display = "none";
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Game Info */}
+              <div className="mb-3">
+                <h6>Title:</h6>
+                <p>{selectedGameForDetails.long_title || selectedGameForDetails.title}</p>
+              </div>
+
+              {/* Store Link */}
+              {selectedGameForDetails.store_url && (
+                <div className="mb-3">
+                  <a
+                    href={selectedGameForDetails.store_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-sm btn-outline-primary"
+                  >
+                    View on GOG Store
+                  </a>
+                </div>
+              )}
+
+              {/* Changelog */}
+              {selectedGameForDetails.changelog && (
+                <div className="mb-3">
+                  <h6>Changelog:</h6>
+                  <div
+                    style={{
+                      maxHeight: "200px",
+                      overflow: "auto",
+                      backgroundColor: "#2b3035",
+                      padding: "10px",
+                      borderRadius: "5px",
+                    }}
+                  >
+                    <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                      {selectedGameForDetails.changelog}
+                    </pre>
+                  </div>
+                </div>
+              )}
+
+              {/* Downloads */}
+              {selectedGameForDetails.downloads && selectedGameForDetails.downloads.length > 0 && (
+                <div className="mb-3">
+                  <h6>Available Downloads ({selectedGameForDetails.downloads.length}):</h6>
+                  <ListGroup style={{ maxHeight: "200px", overflow: "auto" }}>
+                    {selectedGameForDetails.downloads.map((download, idx) => (
+                      <ListGroup.Item key={idx}>
+                        <div>
+                          <strong>{download.name}</strong>
+                        </div>
+                        <div className="small text-muted">
+                          {download.os_type} | {download.lang} | {formatBytes(download.size)}
+                          {download.version && ` | v${download.version}`}
+                        </div>
+                        {download.desc && (
+                          <div className="small">{download.desc}</div>
+                        )}
+                      </ListGroup.Item>
+                    ))}
+                  </ListGroup>
+                </div>
+              )}
+
+              {/* Extras */}
+              {selectedGameForDetails.extras && selectedGameForDetails.extras.length > 0 && (
+                <div className="mb-3">
+                  <h6>Extras ({selectedGameForDetails.extras.length}):</h6>
+                  <ListGroup style={{ maxHeight: "150px", overflow: "auto" }}>
+                    {selectedGameForDetails.extras.map((extra, idx) => (
+                      <ListGroup.Item key={idx}>
+                        <div>
+                          <strong>{extra.name}</strong>
+                        </div>
+                        <div className="small text-muted">
+                          {formatBytes(extra.size)}
+                          {extra.desc && ` | ${extra.desc}`}
+                        </div>
+                      </ListGroup.Item>
+                    ))}
+                  </ListGroup>
+                </div>
+              )}
+
+              {/* Serials */}
+              {selectedGameForDetails.serials && Object.keys(selectedGameForDetails.serials).length > 0 && (
+                <div className="mb-3">
+                  <h6>Serial Keys:</h6>
+                  <div
+                    style={{
+                      backgroundColor: "#2b3035",
+                      padding: "10px",
+                      borderRadius: "5px",
+                    }}
+                  >
+                    {Object.entries(selectedGameForDetails.serials).map(([key, value]) => (
+                      <div key={key}>
+                        <strong>{key}:</strong> {value}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setShowGameDetailsModal(false);
+              setSelectedGameForDetails(null);
+            }}
+          >
+            Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </Container>
   );
 }
