@@ -406,6 +406,81 @@ class TestDownloadedGamesOperations:
         assert loaded["1"]["status"] == "complete"
         assert loaded["2"]["status"] == "partial"
 
+    def test_save_downloaded_games_with_verification_state(self, storage: Storage):
+        """Test saving downloaded games with verification state."""
+        downloaded = {
+            1: {
+                "status": "complete",
+                "path": "/games/game1",
+                "verified": True,
+                "verification_date": "2024-01-01T00:00:00",
+            },
+            2: {
+                "status": "complete",
+                "path": "/games/game2",
+                "verified": False,
+                "verification_date": None,
+            },
+        }
+
+        storage.save_downloaded_games(downloaded)
+        loaded = storage.load_downloaded_games()
+
+        assert loaded["1"]["verified"] is True
+        assert loaded["1"]["verification_date"] == "2024-01-01T00:00:00"
+        assert loaded["2"]["verified"] is False
+        assert loaded["2"]["verification_date"] is None
+
+    def test_downloaded_games_roundtrip(self, storage: Storage):
+        """Test that downloaded games data survives save/load roundtrip."""
+        downloaded = {
+            1: {"status": "complete", "path": "/games/game1", "size": 1024000},
+            2: {"status": "partial", "path": "/games/game2", "downloaded_bytes": 512000},
+        }
+
+        storage.save_downloaded_games(downloaded)
+        loaded = storage.load_downloaded_games()
+
+        # Save again and reload
+        storage.save_downloaded_games(loaded)
+        reloaded = storage.load_downloaded_games()
+
+        assert reloaded["1"]["status"] == "complete"
+        assert reloaded["1"]["size"] == 1024000
+        assert reloaded["2"]["downloaded_bytes"] == 512000
+
+    def test_load_downloaded_games_corrupted_json(self, storage: Storage):
+        """Test loading downloaded games when file contains invalid JSON."""
+        # Write invalid JSON
+        with open(storage.downloaded_games_file, "w") as f:
+            f.write("{ invalid json }")
+
+        # Should raise JSONDecodeError
+        with pytest.raises(json.JSONDecodeError):
+            storage.load_downloaded_games()
+
+    def test_save_downloaded_games_complex_data(self, storage: Storage):
+        """Test saving downloaded games with complex nested data."""
+        downloaded = {
+            1: {
+                "status": "complete",
+                "path": "/games/game1",
+                "files": [
+                    {"name": "installer.exe", "size": 1024000, "verified": True},
+                    {"name": "patch.bin", "size": 512000, "verified": True},
+                ],
+                "metadata": {"download_date": "2024-01-01", "version": "1.0.0"},
+            }
+        }
+
+        storage.save_downloaded_games(downloaded)
+        loaded = storage.load_downloaded_games()
+
+        assert "1" in loaded
+        assert len(loaded["1"]["files"]) == 2
+        assert loaded["1"]["files"][0]["name"] == "installer.exe"
+        assert loaded["1"]["metadata"]["version"] == "1.0.0"
+
 
 class TestStorageHelperMethods:
     """Tests for internal helper methods."""
