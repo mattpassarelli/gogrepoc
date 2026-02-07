@@ -98,110 +98,66 @@ def cli(
     # Create and store context
     ctx.obj = CLIContext(config_dir, verbose, log_file)
 
-    logger.debug(f"CLI initialized with config_dir={config_dir}, verbose={verbose}")
+    logger.info(f"CLI initialized with config_dir={config_dir}, verbose={verbose}")
 
 
 @cli.command()
+@click.argument("username", required=False)
+@click.argument("password", required=False)
+@click.option(
+    "--two-factor",
+    "-2",
+    "two_factor_code",
+    help="Two-factor authentication code",
+)
 @click.pass_obj
-def login(ctx: CLIContext) -> None:
-    """Login to GOG account using browser-based authentication.
+def login(
+    ctx: CLIContext,
+    username: Optional[str],
+    password: Optional[str],
+    two_factor_code: Optional[str],
+) -> None:
+    """Login to GOG account.
 
-    Opens your default browser to GOG's login page where you can authenticate
-    using any supported method (email/password, Google, Discord, etc.).
-    After successful login, you'll be redirected to a page with a URL that
-    you need to copy and paste back into the terminal.
+    Authenticate with your GOG account credentials. If username and password
+    are not provided as arguments, you will be prompted to enter them.
 
     Examples:
         gogrepoc login
+        gogrepoc login user@example.com
+        gogrepoc login user@example.com mypassword
+        gogrepoc login --two-factor 123456
     """
     import asyncio
-    import webbrowser
-    from urllib.parse import urlparse, parse_qs
 
-    click.echo("=" * 70)
-    click.secho("GOG Browser-Based Authentication", fg="cyan", bold=True)
-    click.echo("=" * 70)
-    click.echo()
+    # Prompt for credentials if not provided
+    if not username:
+        username = click.prompt("GOG username/email")
 
-    # Generate OAuth authorization URL
-    auth_url = ctx.auth_service.get_auth_url()
+    if not password:
+        password = click.prompt("GOG password", hide_input=True)
 
-    click.echo("Opening your browser to GOG login page...")
-    click.echo()
-    click.secho("If the browser doesn't open automatically, visit this URL:", fg="yellow")
-    click.echo(auth_url)
-    click.echo()
-
-    # Try to open browser
-    try:
-        webbrowser.open(auth_url)
-        click.secho("✓ Browser opened successfully", fg="green")
-    except Exception as e:
-        click.secho(f"⚠ Could not open browser automatically: {e}", fg="yellow")
-        click.echo("Please manually open the URL above in your browser.")
-
-    click.echo()
-    click.echo("=" * 70)
-    click.secho("Instructions:", fg="cyan", bold=True)
-    click.echo("=" * 70)
-    click.echo("1. Login to GOG using any method (email, Google, Discord, etc.)")
-    click.echo("2. After successful login, you'll be redirected to a page")
-    click.echo("3. Copy the ENTIRE URL from your browser's address bar")
-    click.echo("4. Paste it below when prompted")
-    click.echo()
-    click.secho("The URL should look like:", fg="yellow")
-    click.echo("https://embed.gog.com/on_login_success?code=...")
-    click.echo("=" * 70)
-    click.echo()
-
-    # Prompt for redirect URL
-    redirect_url = click.prompt("Paste the redirect URL here", type=str)
-
-    # Extract authorization code from URL
-    try:
-        parsed_url = urlparse(redirect_url)
-        query_params = parse_qs(parsed_url.query)
-        auth_code = query_params.get('code', [None])[0]
-
-        if not auth_code:
-            click.secho("✗ Error: Could not find authorization code in URL", fg="red")
-            click.echo("Make sure you copied the complete URL from the browser.")
-            sys.exit(1)
-
-    except Exception as e:
-        click.secho(f"✗ Error parsing URL: {e}", fg="red")
-        click.echo("Make sure you copied the complete URL from the browser.")
-        sys.exit(1)
-
-    # Exchange code for tokens
-    click.echo()
-    click.echo("Exchanging authorization code for access token...")
+    click.echo(f"Logging in as {username}...")
 
     async def do_login() -> None:
         try:
-            token = await ctx.auth_service.login_with_code(auth_code)
-            click.echo()
-            click.secho("=" * 70, fg="green")
-            click.secho("✓ Login successful!", fg="green", bold=True)
-            click.secho("=" * 70, fg="green")
-            if token.user_id:
-                click.echo(f"User ID: {token.user_id}")
-            click.echo("Your authentication token has been saved.")
-            click.echo("You can now use other commands like 'update' and 'download'.")
-            click.echo()
+            await ctx.auth_service.login(username, password, two_factor_code)
+            click.secho("✓ Login successful!", fg="green")
         except Exception as e:
-            click.echo()
-            click.secho("=" * 70, fg="red")
-            click.secho("✗ Login failed", fg="red", bold=True)
-            click.secho("=" * 70, fg="red")
-            click.echo(f"Error: {e}")
-            click.echo()
-            click.secho("Common issues:", fg="yellow")
-            click.echo("• Make sure you copied the complete URL")
-            click.echo("• The authorization code may have expired (try again)")
-            click.echo("• Check your internet connection")
-            click.echo()
-            sys.exit(1)
+            # Check if 2FA is required
+            if "two-factor" in str(e).lower() or "2fa" in str(e).lower() or "totp" in str(e).lower():
+                click.secho("✗ Two-factor authentication required", fg="red")
+                if not two_factor_code:
+                    code = click.prompt("Enter 2FA code")
+                    try:
+                        await ctx.auth_service.login(username, password, code)
+                        click.secho("✓ Login successful!", fg="green")
+                    except Exception as e2:
+                        click.secho(f"✗ Login failed: {e2}", fg="red")
+                        sys.exit(1)
+            else:
+                click.secho(f"✗ Login failed: {e}", fg="red")
+                sys.exit(1)
 
     asyncio.run(do_login())
 

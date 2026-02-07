@@ -52,11 +52,11 @@ class DownloadSchema(BaseModel):
 class ExtraSchema(BaseModel):
     """Schema for an extra file."""
     
-    name: str
+    name: Optional[str] = None
     href: str
-    size: int
+    size: Optional[int] = None
     desc: str
-    updated: Optional[datetime]
+    updated: Optional[datetime] = None
 
 
 class GameSchema(BaseModel):

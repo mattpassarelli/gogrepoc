@@ -316,6 +316,9 @@ async def update_manifest(
                     # Update manifest
                     manifest_service.update_game(game)
                     
+                except AuthError:
+                    # Re-raise auth errors immediately
+                    raise
                 except Exception as e:
                     logger.error(f"Failed to update game {game_id}: {e}")
                     # Continue with other games
@@ -645,6 +648,9 @@ async def add_without_download(
                 manifest_service.update_game(game)
                 games_added += 1
                 
+            except AuthError:
+                # Re-raise auth errors immediately
+                raise
             except Exception as e:
                 logger.error(f"Failed to add game {game_id}: {e}")
                 continue

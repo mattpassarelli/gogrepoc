@@ -97,145 +97,71 @@ class TestCLIBasics:
 class TestLoginCommand:
     """Test login command."""
 
-    def test_login_browser_oauth_success(self, runner, mock_services):
-        """Test login command with browser-based OAuth flow."""
-        # Mock get_auth_url
-        mock_services["auth_service"].get_auth_url.return_value = "https://auth.gog.com/auth?client_id=123"
-        
-        # Mock login_with_code
-        mock_services["auth_service"].login_with_code = AsyncMock(return_value=Token(
+    def test_login_with_credentials(self, runner, mock_services):
+        """Test login command with username and password."""
+        mock_services["auth_service"].login = AsyncMock(return_value=Token(
             access_token="test_token",
             refresh_token="test_refresh",
             expires_at=datetime.now() + timedelta(hours=1),
             user_id="12345",
         ))
 
-        # Simulate user pasting redirect URL
-        redirect_url = "https://embed.gog.com/on_login_success?code=test_auth_code_123"
-        
-        with patch("webbrowser.open") as mock_browser:
-            result = runner.invoke(
-                cli,
-                ["login"],
-                input=f"{redirect_url}\n",
-            )
-
-            # Verify browser was opened
-            mock_browser.assert_called_once()
-            
-            # Verify success
-            assert result.exit_code == 0
-            assert "Login successful" in result.output
-            assert "User ID: 12345" in result.output
-            
-            # Verify login_with_code was called with correct code
-            mock_services["auth_service"].login_with_code.assert_called_once_with("test_auth_code_123")
-
-    def test_login_browser_oauth_invalid_url(self, runner, mock_services):
-        """Test login command with invalid redirect URL."""
-        mock_services["auth_service"].get_auth_url.return_value = "https://auth.gog.com/auth?client_id=123"
-        
-        # Simulate user pasting invalid URL (no code parameter)
-        invalid_url = "https://embed.gog.com/on_login_success"
-        
-        with patch("webbrowser.open"):
-            result = runner.invoke(
-                cli,
-                ["login"],
-                input=f"{invalid_url}\n",
-            )
-
-            assert result.exit_code == 1
-            assert "Could not find authorization code" in result.output
-
-    def test_login_browser_oauth_malformed_url(self, runner, mock_services):
-        """Test login command with malformed URL."""
-        mock_services["auth_service"].get_auth_url.return_value = "https://auth.gog.com/auth?client_id=123"
-        
-        # Simulate user pasting malformed URL
-        malformed_url = "not-a-valid-url"
-        
-        with patch("webbrowser.open"):
-            result = runner.invoke(
-                cli,
-                ["login"],
-                input=f"{malformed_url}\n",
-            )
-
-            assert result.exit_code == 1
-            assert "Could not find authorization code" in result.output
-
-    def test_login_browser_oauth_code_exchange_failure(self, runner, mock_services):
-        """Test login command when code exchange fails."""
-        mock_services["auth_service"].get_auth_url.return_value = "https://auth.gog.com/auth?client_id=123"
-        mock_services["auth_service"].login_with_code = AsyncMock(
-            side_effect=Exception("Invalid authorization code")
+        result = runner.invoke(
+            cli,
+            ["login", "test@example.com", "password"],
         )
 
-        redirect_url = "https://embed.gog.com/on_login_success?code=invalid_code"
-        
-        with patch("webbrowser.open"):
-            result = runner.invoke(
-                cli,
-                ["login"],
-                input=f"{redirect_url}\n",
-            )
+        assert result.exit_code == 0
+        assert "Login successful" in result.output
+        mock_services["auth_service"].login.assert_called_once()
 
-            assert result.exit_code == 1
-            assert "Login failed" in result.output
-            assert "Invalid authorization code" in result.output
-
-    def test_login_browser_fails_to_open(self, runner, mock_services):
-        """Test login command when browser fails to open."""
-        mock_services["auth_service"].get_auth_url.return_value = "https://auth.gog.com/auth?client_id=123"
-        mock_services["auth_service"].login_with_code = AsyncMock(return_value=Token(
+    def test_login_prompts_for_credentials(self, runner, mock_services):
+        """Test login command prompts for credentials when not provided."""
+        mock_services["auth_service"].login = AsyncMock(return_value=Token(
             access_token="test_token",
             refresh_token="test_refresh",
             expires_at=datetime.now() + timedelta(hours=1),
             user_id="12345",
         ))
 
-        redirect_url = "https://embed.gog.com/on_login_success?code=test_code"
-        
-        # Mock browser.open to raise exception
-        with patch("webbrowser.open", side_effect=Exception("No browser available")):
-            result = runner.invoke(
-                cli,
-                ["login"],
-                input=f"{redirect_url}\n",
-            )
+        result = runner.invoke(
+            cli,
+            ["login"],
+            input="test@example.com\npassword\n",
+        )
 
-            # Should still succeed if user manually opens URL
-            assert result.exit_code == 0
-            assert "Could not open browser automatically" in result.output
-            assert "Login successful" in result.output
+        assert result.exit_code == 0
+        assert "GOG username/email" in result.output
+        assert "GOG password" in result.output
 
-    def test_login_displays_instructions(self, runner, mock_services):
-        """Test that login command displays clear instructions."""
-        mock_services["auth_service"].get_auth_url.return_value = "https://auth.gog.com/auth?client_id=123"
-        mock_services["auth_service"].login_with_code = AsyncMock(return_value=Token(
+    def test_login_with_two_factor(self, runner, mock_services):
+        """Test login command with two-factor authentication."""
+        mock_services["auth_service"].login = AsyncMock(return_value=Token(
             access_token="test_token",
             refresh_token="test_refresh",
             expires_at=datetime.now() + timedelta(hours=1),
             user_id="12345",
         ))
 
-        redirect_url = "https://embed.gog.com/on_login_success?code=test_code"
-        
-        with patch("webbrowser.open"):
-            result = runner.invoke(
-                cli,
-                ["login"],
-                input=f"{redirect_url}\n",
-            )
+        result = runner.invoke(
+            cli,
+            ["login", "test@example.com", "password", "--two-factor", "123456"],
+        )
 
-            # Check for key instructions
-            assert "Browser-Based Authentication" in result.output
-            assert "Instructions:" in result.output
-            assert "Login to GOG" in result.output
-            assert "Copy the ENTIRE URL" in result.output
-            assert "Paste it below" in result.output
-            assert result.exit_code == 0
+        assert result.exit_code == 0
+        assert "Login successful" in result.output
+
+    def test_login_failure(self, runner, mock_services):
+        """Test login command with authentication failure."""
+        mock_services["auth_service"].login = AsyncMock(side_effect=Exception("Invalid credentials"))
+
+        result = runner.invoke(
+            cli,
+            ["login", "test@example.com", "wrong_password"],
+        )
+
+        assert result.exit_code == 1
+        assert "Login failed" in result.output
 
 
 class TestUpdateCommand:

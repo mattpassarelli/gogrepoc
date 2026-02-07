@@ -133,118 +133,144 @@ class TestLoginEndpoint:
 class TestCheckAuthEndpoint:
     """Tests for /api/check-auth endpoint."""
 
-    @patch("gogrepoc.api.routes.get_auth_service")
     def test_check_auth_authenticated(
-        self, mock_get_auth, client: TestClient, mock_token: Token
+        self, client: TestClient, mock_token: Token
     ) -> None:
         """Test check auth when user is authenticated."""
         # Setup mock
         mock_auth_service = MagicMock()
         mock_auth_service.is_authenticated.return_value = True
         mock_auth_service.get_valid_token = AsyncMock(return_value=mock_token)
-        mock_get_auth.return_value = mock_auth_service
+        
+        # Override dependency
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_auth_service] = lambda: mock_auth_service
 
-        # Make request
-        response = client.get("/api/check-auth")
+        try:
+            # Make request
+            response = client.get("/api/check-auth")
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["authenticated"] is True
-        assert data["user_id"] == "test_user_123"
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["authenticated"] is True
+            assert data["user_id"] == "test_user_123"
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
-    @patch("gogrepoc.api.routes.get_auth_service")
-    def test_check_auth_not_authenticated(self, mock_get_auth, client: TestClient) -> None:
+    def test_check_auth_not_authenticated(self, client: TestClient) -> None:
         """Test check auth when user is not authenticated."""
         # Setup mock
-        mock_auth_service = AsyncMock()
+        mock_auth_service = MagicMock()
         mock_auth_service.is_authenticated.return_value = False
-        mock_get_auth.return_value = mock_auth_service
+        
+        # Override dependency
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_auth_service] = lambda: mock_auth_service
 
-        # Make request
-        response = client.get("/api/check-auth")
+        try:
+            # Make request
+            response = client.get("/api/check-auth")
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["authenticated"] is False
-        assert data["user_id"] is None
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["authenticated"] is False
+            assert data["user_id"] is None
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
 
 # Manifest endpoint tests
 class TestManifestEndpoint:
     """Tests for /api/manifest endpoint."""
 
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_get_manifest(
-        self, mock_get_manifest, client: TestClient, mock_game: Game
+        self, client: TestClient, mock_game: Game
     ) -> None:
         """Test getting manifest."""
         # Setup mock
         mock_manifest_service = MagicMock()
         mock_manifest_service.get_all_games.return_value = [mock_game]
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependency
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.get("/api/manifest")
+        try:
+            # Make request
+            response = client.get("/api/manifest")
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_count"] == 1
-        assert len(data["games"]) == 1
-        assert data["games"][0]["id"] == 123
-        assert data["games"][0]["title"] == "Test Game"
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total_count"] == 1
+            assert len(data["games"]) == 1
+            assert data["games"][0]["id"] == 123
+            assert data["games"][0]["title"] == "Test Game"
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_get_manifest_with_filters(
-        self, mock_get_manifest, client: TestClient, mock_game: Game
+        self, client: TestClient, mock_game: Game
     ) -> None:
         """Test getting manifest with OS and language filters."""
         # Setup mock
         mock_manifest_service = MagicMock()
         mock_manifest_service.filter_games.return_value = [mock_game]
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependency
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.get("/api/manifest?os_types=windows&languages=en")
+        try:
+            # Make request
+            response = client.get("/api/manifest?os_types=windows&languages=en")
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_count"] == 1
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total_count"] == 1
 
-        # Verify filter was called
-        mock_manifest_service.filter_games.assert_called_once()
+            # Verify filter was called
+            mock_manifest_service.filter_games.assert_called_once()
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
-    @patch("gogrepoc.api.routes.get_manifest_service")
-    def test_get_manifest_empty(self, mock_get_manifest, client: TestClient) -> None:
+    def test_get_manifest_empty(self, client: TestClient) -> None:
         """Test getting empty manifest."""
         # Setup mock
         mock_manifest_service = MagicMock()
         mock_manifest_service.get_all_games.return_value = []
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependency
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.get("/api/manifest")
+        try:
+            # Make request
+            response = client.get("/api/manifest")
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_count"] == 0
-        assert len(data["games"]) == 0
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total_count"] == 0
+            assert len(data["games"]) == 0
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
 
 # Update endpoint tests
 class TestUpdateEndpoint:
     """Tests for /api/update endpoint."""
 
-    @patch("gogrepoc.api.routes.get_gog_api_service")
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_update_specific_games(
         self,
-        mock_get_manifest,
-        mock_get_gog_api,
         client: TestClient,
         mock_game: Game,
     ) -> None:
@@ -255,65 +281,73 @@ class TestUpdateEndpoint:
             "id": 123,
             "title": "Test Game",
         }
-        mock_get_gog_api.return_value = mock_gog_api
 
         mock_manifest_service = MagicMock()
         mock_manifest_service.get_game_by_id.return_value = mock_game
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependencies
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_gog_api_service] = lambda: mock_gog_api
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.post(
-            "/api/update",
-            json={
-                "game_ids": [123],
-                "os_types": ["windows"],
-                "languages": ["en"],
-            },
-        )
+        try:
+            # Make request
+            response = client.post(
+                "/api/update",
+                json={
+                    "game_ids": [123],
+                    "os_types": ["windows"],
+                    "languages": ["en"],
+                },
+            )
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["games_updated"] >= 0
-        assert data["games_added"] >= 0
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["games_updated"] >= 0
+            assert data["games_added"] >= 0
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
-    @patch("gogrepoc.api.routes.get_gog_api_service")
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_update_auth_error(
-        self, mock_get_manifest, mock_get_gog_api, client: TestClient
+        self, client: TestClient
     ) -> None:
         """Test update with authentication error."""
         # Setup mock to raise AuthError
         mock_gog_api = AsyncMock()
         mock_gog_api.get_game_details.side_effect = AuthError("Not authenticated")
-        mock_get_gog_api.return_value = mock_gog_api
-
+        
         mock_manifest_service = MagicMock()
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependencies
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_gog_api_service] = lambda: mock_gog_api
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.post(
-            "/api/update",
-            json={
-                "game_ids": [123],
-            },
-        )
+        try:
+            # Make request
+            response = client.post(
+                "/api/update",
+                json={
+                    "game_ids": [123],
+                },
+            )
 
-        # Verify response
-        assert response.status_code == 401
+            # Verify response - should be 401 since AuthError is raised
+            assert response.status_code == 401
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
 
 # Download endpoint tests
 class TestDownloadEndpoint:
     """Tests for /api/download endpoint."""
 
-    @patch("gogrepoc.api.routes.get_download_service")
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_start_download(
         self,
-        mock_get_manifest,
-        mock_get_download,
         client: TestClient,
         mock_game: Game,
     ) -> None:
@@ -321,72 +355,91 @@ class TestDownloadEndpoint:
         # Setup mocks
         mock_manifest_service = MagicMock()
         mock_manifest_service.get_game_by_id.return_value = mock_game
-        mock_get_manifest.return_value = mock_manifest_service
-
+        
         mock_download_service = AsyncMock()
-        mock_get_download.return_value = mock_download_service
+        
+        # Override dependencies
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
+        app.dependency_overrides[routes.get_download_service] = lambda: mock_download_service
 
-        # Make request
-        response = client.post(
-            "/api/download",
-            json={
-                "game_ids": [123],
-                "save_dir": "/tmp/games",
-                "os_types": ["windows"],
-                "languages": ["en"],
-            },
-        )
+        try:
+            # Make request
+            response = client.post(
+                "/api/download",
+                json={
+                    "game_ids": [123],
+                    "save_dir": "/tmp/games",
+                    "os_types": ["windows"],
+                    "languages": ["en"],
+                },
+            )
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert "task_id" in data
-        assert len(data["task_id"]) > 0
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert "task_id" in data
+            assert len(data["task_id"]) > 0
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_start_download_game_not_found(
-        self, mock_get_manifest, client: TestClient
+        self, client: TestClient
     ) -> None:
         """Test starting download for non-existent game."""
         # Setup mock
         mock_manifest_service = MagicMock()
         mock_manifest_service.get_game_by_id.return_value = None
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependency
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.post(
-            "/api/download",
-            json={
-                "game_ids": [999],
-                "save_dir": "/tmp/games",
-            },
-        )
+        try:
+            # Make request
+            response = client.post(
+                "/api/download",
+                json={
+                    "game_ids": [999],
+                    "save_dir": "/tmp/games",
+                },
+            )
 
-        # Verify response
-        assert response.status_code == 404
+            # Verify response
+            assert response.status_code == 404
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_start_download_invalid_path(
-        self, mock_get_manifest, client: TestClient, mock_game: Game
+        self, client: TestClient, mock_game: Game
     ) -> None:
         """Test starting download with relative path."""
         # Setup mock
         mock_manifest_service = MagicMock()
         mock_manifest_service.get_game_by_id.return_value = mock_game
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependency
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request with relative path
-        response = client.post(
-            "/api/download",
-            json={
-                "game_ids": [123],
-                "save_dir": "relative/path",
-            },
-        )
+        try:
+            # Make request with relative path
+            response = client.post(
+                "/api/download",
+                json={
+                    "game_ids": [123],
+                    "save_dir": "relative/path",
+                },
+            )
 
-        # Verify response
-        assert response.status_code == 400
+            # Verify response
+            assert response.status_code == 400
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
 
 class TestDownloadProgressEndpoint:
@@ -402,10 +455,8 @@ class TestDownloadProgressEndpoint:
 class TestAddWithoutDownloadEndpoint:
     """Tests for /api/add_without_download endpoint."""
 
-    @patch("gogrepoc.api.routes.get_gog_api_service")
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_add_without_download(
-        self, mock_get_manifest, mock_get_gog_api, client: TestClient
+        self, client: TestClient
     ) -> None:
         """Test adding games without downloading."""
         # Setup mocks
@@ -414,49 +465,61 @@ class TestAddWithoutDownloadEndpoint:
             "id": 123,
             "title": "Test Game",
         }
-        mock_get_gog_api.return_value = mock_gog_api
 
         mock_manifest_service = MagicMock()
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependencies
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_gog_api_service] = lambda: mock_gog_api
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.post(
-            "/api/add_without_download",
-            json={
-                "game_ids": [123],
-            },
-        )
+        try:
+            # Make request
+            response = client.post(
+                "/api/add_without_download",
+                json={
+                    "game_ids": [123],
+                },
+            )
 
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["games_added"] >= 0
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["games_added"] >= 0
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
-    @patch("gogrepoc.api.routes.get_gog_api_service")
-    @patch("gogrepoc.api.routes.get_manifest_service")
     def test_add_without_download_auth_error(
-        self, mock_get_manifest, mock_get_gog_api, client: TestClient
+        self, client: TestClient
     ) -> None:
         """Test add without download with authentication error."""
         # Setup mock to raise AuthError
         mock_gog_api = AsyncMock()
         mock_gog_api.get_game_details.side_effect = AuthError("Not authenticated")
-        mock_get_gog_api.return_value = mock_gog_api
-
+        
         mock_manifest_service = MagicMock()
-        mock_get_manifest.return_value = mock_manifest_service
+        
+        # Override dependencies
+        from gogrepoc.api import routes
+        app.dependency_overrides[routes.get_gog_api_service] = lambda: mock_gog_api
+        app.dependency_overrides[routes.get_manifest_service] = lambda: mock_manifest_service
 
-        # Make request
-        response = client.post(
-            "/api/add_without_download",
-            json={
-                "game_ids": [123],
-            },
-        )
+        try:
+            # Make request
+            response = client.post(
+                "/api/add_without_download",
+                json={
+                    "game_ids": [123],
+                },
+            )
 
-        # Verify response
-        assert response.status_code == 401
+            # Verify response - should be 401 since AuthError is raised
+            assert response.status_code == 401
+        finally:
+            # Clean up
+            app.dependency_overrides.clear()
 
 
 # Health check test
