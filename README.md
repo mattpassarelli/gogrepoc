@@ -1,352 +1,444 @@
-gogrepo gamma
---------------
-Python-based tool for downloading your GOG.com game collections and extras to your local computer for full offline enjoyment.
+# GOGRepoc - GOG Game Collection Manager
 
-It is a clean standalone python script that can be run from anywhere. It requires a typical Python 2.7 or Python 3 installation and html5lib, requests and pyOpenSSL.
+Python-based tool for downloading and managing your GOG.com game collections and extras to your local computer for full offline enjoyment.
 
-By default, game folders are saved in the same location that the script is run in. You can also specify another
-directory. Run gogrepo.py -h to see help or read more below. Each game has its own directories with all game/bonus files saved within.
+**Note:** This is a refactored version with improved architecture, modern Python practices, and multiple interfaces (CLI, API, Web UI).
 
-License: GPLv3+
+## Features
 
-Features
---------
-* Ability to choose which games to download based on combinations of OS (windows, linux, mac) and language (en, fr, de, etc...)
-* Saves a !info.txt in each game folder with information about each game/extra item.
-* Creates a !serial.txt if the game has a special serial/cdkey (I know, not 100% DRM-free, is it?). Sometimes coupon codes are hidden here!
-* Verify your downloaded collection with full MD5, zip integrity, and expected file size checking.
-* Auto retrying of failed fetch/downloads. Sometime GOG servers report temporary errors.
-* Download resume support for interrupted downloads where possible.
-* Ability to import your already existing local collection.
-* Easy to throw into a daily cronjob to get all the latest updates and newly added content!
-* Clear logging prints showing update/download progress and HTTP errors. Log files are created by default but can be disabled.
+* **Multiple Interfaces**: Command-line (CLI), REST API, and Web UI
+* **Modern Architecture**: Clean separation of concerns with services, infrastructure, and API layers
+* **Async Support**: Efficient async/await for network operations
+* **Download Management**: Resume support, MD5 verification, concurrent downloads
+* **Flexible Filtering**: Choose games by OS (Windows, Linux, Mac) and language
+* **Progress Tracking**: Real-time download progress with Server-Sent Events (SSE)
+* **Authentication**: Secure token storage with automatic refresh
+* **Cross-Platform**: Works on Windows, Linux, and macOS
 
-Quick Start -- Typical Use Case
-----------------
+## Requirements
 
-* Login to GOG and save your login cookie for later commands. Your login/pass can be specified or be prompted. You generally only need to do this once to create a valid gog-cookies.dat
+* Python 3.13+ (uses modern Python features)
+* Dependencies (install via `pip install -r requirements.txt`):
+  - `httpx` - Modern async HTTP client
+  - `click` - CLI framework
+  - `fastapi` - Web API framework
+  - `uvicorn` - ASGI server
+  - `pydantic` - Data validation
+  - `html5lib` - HTML parsing
+  - `beautifulsoup4` - Web scraping
+  - `cryptography` - Secure token storage
 
-  ``gogrepoc.py login``
+## Installation
 
-* Fetch all new and updated game and bonus information from GOG for items that you own and save into a local manifest file. Run this whenever you want to discover newly added games or game updates.
+### Using uv (Recommended)
 
-  ``gogrepoc.py update``
-
-* Download the games and bonus files for the OS and languages you want for all items known from the saved manifest file.
-
-  ``gogrepoc.py download``
-
-* Verify and report integrity of all downloaded files. Does MD5, zip integrity, and expected filesize verification. This makes sure your game files can actually be read back and are healthy.
-
-  ``gogrepoc.py verify``
-
-Advanced Usage -- Common Tasks
-----------------
-
-* Add new games from your library to the manifest.
-
-  ``gogrepoc.py update -os windows -lang en de -skipknown``
-
-* Update games with the updated tag in your libary.
-
-  ``gogrepoc.py update -os windows -lang en de -updateonly``
-
-* Update one or more specified games in your manifest.
-
-  ``gogrepoc.py update -ids trine_2_complete_story``
-
-* Download one or more specified games game in your manifest.
-
-  ``gogrepoc.py download -ids trine_2_complete_story``
-
-Commands
---------
-
-``gogrepoc.py login`` Authenticate with GOG and save the cookie locally in gog-cookies.dat file. This is needed to do
-update or download command. Run this once first before doing update and download.
-
-    login [username] [password]
-    username    GOG username/email
-    password    GOG password
-
---
-
-``gogrepoc.py update`` Fetch game data and information from GOG.com for the specified operating systems and languages. This collects file game titles, download links, serial numbers, MD5/filesize data and saves the data locally in a manifest file. Manifest is saved in a gog-manifest.dat file
-
-    update [-os [OS [OS ...]]] [-lang [LANG [LANG ...]]] [-skipknown | -updateonly | -id <title>]
-    -os [OS [OS ...]]    	operating system(s) (ex. windows linux mac)
-	-skipos				 	skip operating system(s)
-							Can't be used with -os
-    -lang [LANG [LANG ...]] game language(s) (ex. en fr de)
-	-skiplang				skip game language(s)
-							Can't be used with -lang
-	-standard				update new and updated games only (default unless -ids used)
-							Can't be used with -skipknown, -updateonly, -full
-    -skipknown            	only update new games in your library
-    -updateonly           	only update games with the updated tag in your library
-	-full				  	update all games on your account (default if -ids used)
-	-ids <title>		  	id(s)/titles(s) of (a) specific game(s) to update
-    -id <title>           	specify the game to update by 'title' from the manifest. Deprecated by -ids
-							<title> can be found in the !info.txt of the game directory
-	-skipids <title>	  	id(s)/titles(s) of (a) specific game(s) not to update
-	-resumemode			  	how to handle resuming if necessary: noresume, resume, or onlyresume. Default: resume
-	-strictverify 		  	clear previously verified unless md5 match
-	-skiphidden			  	skip games marked as hidden
-	-installers			  	GOG Installer type to use: galaxy, standalone or both. Default: standalone
-	-wait <WAIT>			wait this long in hours before starting
-
---
-
-``gogrepoc.py download`` Use the saved manifest file from an update command, and download all known game items and bonus files.
-
-    download [savedir] [-dryrun] [-skipextras] [-skipextras] [-skipgames] [-wait WAIT] [-id <title>]
-    savedir      	   directory to save downloads to
-    -dryrun      	   display, but skip downloading of any files
-    -skipextras  	   skip downloading of any GOG extra files
-    -skipgames   	   skip downloading of any GOG game files. Deprecated by -skipgalaxy, -skipstandalone and -skipshared
-	-skipgalaxy  	   skip downloading Galaxy installers
-    -skipstandalone    skip downloading standlone installers
-    -skipshared 	   skip downloading installers shared between Galaxy and standalone
-	-skipfiles <file>  file name (or glob patterns) to NOT download
-    -wait <WAIT>   	   wait this long in hours before starting
-	-ids <title>	   id(s) or title(s) of the game in the manifest to download
-    -id <title>  	   specify the game to download by 'title' from the manifest. Deprecated by -ids
-					   <title> can be found in the !info.txt of the game directory
-    -skipids <title>   id(s) or title(s) of the game(s) in the manifest to NOT download, default=[])
-    -os [OS [OS ...]]  download game files only for operating system(s) (ex. windows linux mac)
-	-skipos			   skip downloading game files for operating system(s)
-					   Can't be used with -os
-    -lang [LANG [LANG ...]] download game files only for language(s) (ex. en fr de)
-	-skiplang		   skip downloading game files for language(s)
-					   Can't be used with -lang
---
-
-``gogrepoc.py verify`` Check all your game files against the save manifest data, and verify MD5, zip integrity, and
-expected file size. Any missing or corrupt files will be reported.
-
-    verify [gamedir] [-skipmd5] [-skipsize] [-skipzip] [-delete]
-    gamedir     directory containing games to verify
-	-forceverify (also verify files that are unchanged (by gogrepo) since they were last successfully verified)
-    -skipmd5    	   do not perform MD5 check
-    -skipsize   	   do not perform size check
-    -skipzip    	   do not perform zip integrity check
-	-skipextras  	   skip verification of any GOG extra files
-    -skipgames   	   skip verification of any GOG game files. Deprecated by -skipgalaxy, -skipstandalone and -skipshared
-	-skipgalaxy 	   skip verification of any GOG Galaxy installer files
-    -skipstandalone    skip verification of any GOG standalone installer files
-    -skipshared 	   skip verification of any installers included in both the GOG Galalaxy and Standalone sets
-	-skipfiles <file>  file name (or glob patterns) to NOT verify
-    -ids <title>	   id(s) or title(s) of the game in the manifest to verify
-    -id <title>  	   specify the game to verify by 'title' from the manifest. Deprecated by -ids
-					   <title> can be found in the !info.txt of the game directory
-    -skipids <title>   id(s) or title(s) of the game(s) in the manifest to NOT verify, default=[])
-    -os [OS [OS ...]]  verify game files only for operating system(s) (ex. windows linux mac)
-	-skipos			   skip verification of game files for operating system(s)
-					   Can't be used with -os
-    -lang [LANG [LANG ...]] verify game files only for language(s) (ex. en fr de)
-	-skiplang		   skip downloading game files for language(s)
-					   Can't be used with -lang
-	-delete    		   delete any files which fail integrity test
-	-clean 			   clean any files which fail integrity test
-
---
-
-``gogrepoc.py import`` Search an already existing GOG collection for game item/files, and import them to your
-new GOG folder with clean game directory names and file names as GOG has them named on their servers.
-
-    import [src_dir] [dest_dir]
-    src_dir     	   source directory to import games from
-    dest_dir    	   directory to copy and name imported files to
-	-skipgalaxy  	   skip importing Galaxy installers
-    -skipstandalone    skip importing standlone installers
-    -skipshared 	   skip importing installers shared between Galaxy and standalone
-	-ids <title>	   id(s) or title(s) of the game in the manifest to import
-    -skipids <title>   id(s) or title(s) of the game(s) in the manifest to NOT import, default=[])
-    -os [OS [OS ...]]  import game files only for operating system(s) (ex. windows linux mac)
-	-skipos			   skip importing game files for operating system(s)
-					   Can't be used with -os
-    -lang [LANG [LANG ...]] import game files only for language(s) (ex. en fr de)
-	-skiplang		   skip importing game files for language(s)
-					   Can't be used with -lang
---
-
-``gogrepoc.py backup`` Make copies of all known files in manifest file from a source directory to a backup destination directory. Useful for cleaning out older files from your GOG collection.
-
-    backup [src_dir] [dest_dir]
-    src_dir     	   source directory containing gog items
-    dest_dir    	   destination directory to backup files to
-	-skipextras  	   skip backup of any GOG extra files
-    -skipgames   	   skip backup of any GOG game files. Deprecated by -skipgalaxy, -skipstandalone and -skipshared
-	-skipgalaxy  	   skip backup of Galaxy installers
-    -skipstandalone    skip backup of standlone installers
-    -skipshared 	   skip backup of installers shared between Galaxy and standalone
-	-ids <title>	   id(s) or title(s) of the game in the manifest to backup
-    -skipids <title>   id(s) or title(s) of the game(s) in the manifest to NOT backup, default=[])
-    -os [OS [OS ...]]  backup game files only for operating system(s) (ex. windows linux mac)
-	-skipos			   skip backup of game files for operating system(s)
-					   Can't be used with -os
-    -lang [LANG [LANG ...]] backup game files only for language(s) (ex. en fr de)
-	-skiplang		   skip backup of game files for language(s)
-					   Can't be used with -lang
---
-
-``gogrepoc.py clean`` Clean your games directory of files not known by manifest. Moves files to the !orphaned folder.
-
-    clean [cleandir] [-dryrun]
-    cleandir    root directory containing gog games to be cleaned
-    -dryrun     do not move files, only display what would be cleaned
-	
---
-
-``gogrepoc.py trash`` Permanently remove orphaned files in your game directory.
-
-    trash [gamedir] [-dryrun] [-installersonly] 
-    gamedir    		root directory containing gog games
-    -dryrun     	do not move files, only display what would be trashed
-	-installersonly only delete file types used as installers
-
---
-
-``gogrepoc.py compress`` Compresses a dircetory into a highly compressed 7z file. Useful for cold storage, archiving of games, or systems like GameVault.
-
-    compress [-compressdir <path>]
-    -compressdir <path>  directory to compress, default is current directory
-
---
-
-Other arguments:
-	-h, --help  	show help message and exit. Used in all commands.
-	-nolog 			don't write to log file gogrepo.log. Used in all commands.
-	-v, --version	show version number and exit. Used in all commands.
-
-
-GUI
-------------
-The GUI is built with React and a Python FastAPI server. This lets the system be even more system agnostic, and run on any system that supports Python and a web browser.
-
-### Features
-
-* Clean, modern interface with dark mode support
-* Two-column game selection system:
-  - Available Games list showing all games in your GOG library
-  - Games Queue showing games selected for download and already downloaded games
-* Easy game selection with multi-select capability
-* Download directory is configurable
-* Compression options for downloads
-* Ability to mark games as downloaded without actually downloading them
-
-### Setup and Running
-
-#### Linux
-1. Install the required Python packages for the backend:
 ```bash
-sudo apt update
-sudo apt install python3-venv
-python3 -m venv gogrepo-env
-source gogrepo-env/bin/activate
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone the repository
+git clone https://github.com/yourusername/gogrepoc.git
+cd gogrepoc
+
+# Install dependencies
+uv pip install -r requirements.txt
+```
+
+### Using pip
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/gogrepoc.git
+cd gogrepoc
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-2. Install Node.js dependencies for the UI:
+## Quick Start
+
+### CLI Usage
+
+The CLI provides a simple command-line interface for managing your GOG collection.
+
+#### 1. Login to GOG
+
 ```bash
+python -m gogrepoc.cli.main login
+# Or provide credentials directly:
+python -m gogrepoc.cli.main login user@example.com password
+# With 2FA:
+python -m gogrepoc.cli.main login user@example.com password --two-factor 123456
+```
+
+#### 2. Update Game Manifest
+
+Fetch your game library from GOG:
+
+```bash
+# Update all games
+python -m gogrepoc.cli.main update
+
+# Update specific games by ID
+python -m gogrepoc.cli.main update --ids 1234 5678
+
+# Filter by OS and language
+python -m gogrepoc.cli.main update --os windows --os linux --lang en
+```
+
+#### 3. Download Games
+
+```bash
+# Download all games to a directory
+python -m gogrepoc.cli.main download /path/to/games
+
+# Download specific games
+python -m gogrepoc.cli.main download /path/to/games --ids 1234 5678
+
+# Filter downloads
+python -m gogrepoc.cli.main download /path/to/games --os windows --lang en
+
+# Adjust concurrent downloads (default: 4)
+python -m gogrepoc.cli.main download /path/to/games --concurrent 8
+```
+
+#### 4. Other CLI Commands
+
+```bash
+# Backup manifest and tokens
+python -m gogrepoc.cli.main backup /path/to/backup
+
+# Clean temporary files
+python -m gogrepoc.cli.main clean /path/to/games
+python -m gogrepoc.cli.main clean /path/to/games --dry-run
+
+# Move files to trash
+python -m gogrepoc.cli.main trash file1.exe file2.bin
+
+# Compress files with 7zip
+python -m gogrepoc.cli.main compress file1.exe --level 9
+```
+
+#### CLI Global Options
+
+```bash
+# Enable verbose logging
+python -m gogrepoc.cli.main --verbose update
+
+# Use custom config directory
+python -m gogrepoc.cli.main --config-dir ~/.my-gog-config login
+
+# Write logs to file
+python -m gogrepoc.cli.main --log-file gogrepo.log update
+```
+
+### API Usage
+
+The REST API provides programmatic access to all GOGRepoc functionality.
+
+#### Starting the API Server
+
+```bash
+# Start with uvicorn
+uvicorn gogrepoc.api.main:app --host 0.0.0.0 --port 8000
+
+# With auto-reload for development
+uvicorn gogrepoc.api.main:app --reload --port 8000
+```
+
+#### API Endpoints
+
+**Authentication:**
+- `POST /api/login` - Login with GOG credentials
+- `GET /api/check-auth` - Check authentication status
+
+**Manifest Management:**
+- `GET /api/manifest` - Get game manifest (with optional filters)
+- `POST /api/update` - Update manifest from GOG
+- `POST /api/add_without_download` - Add games to manifest without downloading
+
+**Downloads:**
+- `POST /api/download` - Start download task
+- `GET /api/download-progress/{task_id}` - Stream download progress (SSE)
+
+**Health:**
+- `GET /health` - Health check endpoint
+
+#### API Examples
+
+```bash
+# Login
+curl -X POST http://localhost:8000/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "user@example.com", "password": "password"}'
+
+# Check auth status
+curl http://localhost:8000/api/check-auth
+
+# Get manifest
+curl http://localhost:8000/api/manifest
+
+# Get manifest with filters
+curl "http://localhost:8000/api/manifest?os_types=windows&languages=en"
+
+# Update manifest
+curl -X POST http://localhost:8000/api/update \
+  -H "Content-Type: application/json" \
+  -d '{"game_ids": [1234, 5678], "os_types": ["windows"], "languages": ["en"]}'
+
+# Start download
+curl -X POST http://localhost:8000/api/download \
+  -H "Content-Type: application/json" \
+  -d '{"game_ids": [1234], "save_dir": "/tmp/games", "os_types": ["windows"]}'
+
+# Monitor download progress (Server-Sent Events)
+curl http://localhost:8000/api/download-progress/task-id-here
+```
+
+#### API Documentation
+
+Once the server is running, visit:
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+### Web UI Usage
+
+The Web UI provides a modern, user-friendly interface for managing your GOG collection.
+
+#### Starting the Web UI
+
+**Option 1: Development Mode (with hot reload)**
+
+```bash
+# Terminal 1: Start the API server
+uvicorn gogrepoc.api.main:app --reload --port 8000
+
+# Terminal 2: Start the React dev server
 cd ui
-npm install
+npm install  # First time only
+npm start
+```
+
+Then open `http://localhost:3000` in your browser.
+
+**Option 2: Production Mode**
+
+```bash
+# Build the React app
+cd ui
+npm install  # First time only
 npm run build
 cd ..
+
+# Start the API server (serves both API and UI)
+uvicorn gogrepoc.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-3. Start the backend server:
+Then open `http://localhost:8000` in your browser.
+
+**Option 3: Separate Servers**
+
 ```bash
-uvicorn main:app --port 8000
+# Terminal 1: Start the API server
+uvicorn gogrepoc.api.main:app --port 8000
+
+# Terminal 2: Serve the built UI
+cd ui
+npm run build  # First time only
+python -m http.server 3000 --directory build
 ```
 
-4. In a second terminal window, start a simple HTTP server to serve the React build files:
+Then open `http://localhost:3000` in your browser.
+
+#### Web UI Features
+
+* **Clean Interface**: Modern, responsive design with dark mode support
+* **Game Library**: Browse and search your GOG game collection
+* **Download Queue**: Select games and manage download queue
+* **Real-time Progress**: Live download progress with speed and ETA
+* **Filtering**: Filter games by OS, language, and download status
+* **Settings**: Configure download directory, compression, and preferences
+
+#### Web UI Workflow
+
+1. **Login**: Enter your GOG credentials
+2. **Update Library**: Click "Update List" to fetch your games from GOG
+3. **Browse Games**: View your game collection in the Available Games list
+4. **Select Games**: Click games to select them for download
+5. **Configure**: Set download directory and options
+6. **Download**: Click "Download Games" to start
+7. **Monitor**: Watch real-time progress in the download panel
+
+## Configuration
+
+### Config Directory
+
+By default, GOGRepoc stores configuration in `~/.gogrepoc/`:
+- `gog-token.dat` - Encrypted authentication token
+- `gog-manifest.dat` - Game manifest (JSON)
+- `gog-downloaded-games.dat` - Download tracking
+
+You can change this with the `--config-dir` option (CLI) or by setting environment variables.
+
+### Environment Variables
+
 ```bash
-cd ui
-python3 -m http.server 3000 --directory ./ui/build
+# API server configuration
+export GOGREPOC_HOST=0.0.0.0
+export GOGREPOC_PORT=8000
+export GOGREPOC_CONFIG_DIR=~/.gogrepoc
+
+# Logging
+export GOGREPOC_LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
+export GOGREPOC_LOG_FILE=gogrepo.log
 ```
 
-5. Open your web browser and navigate to `http://localhost:3000` to access the GUI.
+## Architecture
 
-#### Windows
-1. Install the required Python packages for the backend:
-```powershell
-python -m venv gogrepo-env
-.\gogrepo-env\Scripts\Activate.ps1
-pip install -r requirements.txt
+The refactored codebase follows clean architecture principles:
+
 ```
-2. Install Node.js dependencies for the UI:
-```powershell
-cd ui
-npm install
-npm run build
-cd ..
+gogrepoc/
+├── api/           # FastAPI REST API
+│   ├── main.py    # FastAPI app and middleware
+│   ├── routes.py  # API endpoints
+│   └── schemas.py # Pydantic models
+├── cli/           # Click-based CLI
+│   └── main.py    # CLI commands
+├── core/          # Domain models and exceptions
+│   ├── models.py      # Game, Download, Token models
+│   ├── exceptions.py  # Custom exceptions
+│   └── constants.py   # Constants
+├── services/      # Business logic
+│   ├── auth.py        # Authentication service
+│   ├── gog_api.py     # GOG API client
+│   ├── manifest.py    # Manifest management
+│   └── downloader.py  # Download service
+├── infrastructure/ # External dependencies
+│   ├── http_client.py  # HTTP client wrapper
+│   ├── storage.py      # File storage
+│   ├── file_system.py  # File operations
+│   └── platform.py     # Platform detection
+└── utils/         # Utilities
+    ├── logging_config.py
+    ├── compression.py
+    ├── hashing.py
+    └── wakelock.py
 ```
 
-3. Start the backend server:
-```powershell
-uvicorn main:app --port 8000 
+## Testing
+
+```bash
+# Run all tests
+python -m pytest
+
+# Run specific test files
+python -m pytest tests/unit/test_cli.py
+python -m pytest tests/unit/test_api.py
+python -m pytest tests/unit/test_auth.py
+
+# Run with coverage
+python -m pytest --cov=gogrepoc --cov-report=html
+
+# Run with verbose output
+python -m pytest -v
 ```
 
-4. In a second terminal window, start a simple HTTP server to serve the React build files:
-```powershell
-cd ui
-python -m http.server 3000 --directory .\ui\build
+## Development
+
+### Code Style
+
+The project uses:
+- `black` for code formatting
+- `isort` for import sorting
+- `flake8` for linting
+- `mypy` for type checking
+
+```bash
+# Format code
+black gogrepoc tests
+
+# Sort imports
+isort gogrepoc tests
+
+# Lint
+flake8 gogrepoc tests
+
+# Type check
+mypy gogrepoc
 ```
 
-5. Open your web browser and navigate to `http://localhost:3000` to access the GUI.
+### Pre-commit Hooks
 
+```bash
+# Install pre-commit hooks
+pre-commit install
 
-### GUI Workflow
+# Run manually
+pre-commit run --all-files
+```
 
-1. Login with your GOG credentials
-2. Use the "Update List" button to fetch your game library
-3. Select games from the Available Games list
-4. Move them to the download queue using the arrow buttons
-5. Configure your download directory
-6. Optional: Enable compression for downloads
-7. Click "Download Games" to start downloading
-8. Optional: Ability to add games to the manifest without downloading them
+## Troubleshooting
 
+### Authentication Issues
 
-Compression Script
-------------
-A simple Python based compression function is built into the main `gogrepoc.py` file. Run using `gogrepoc.py compress -compressdir $PATH`. Requires 7-Zip (or a fork of it like Nanazip) to be installed on your machine. 
+If you get authentication errors:
+1. Delete `~/.gogrepoc/gog-token.dat`
+2. Run `python -m gogrepoc.cli.main login` again
+3. If using 2FA, make sure to provide the code with `--two-factor`
 
-Useful for systems storing games on a NAS, where storage space can be a premium. Or for systems like GameVault where the library requires a specific format.
+### Download Issues
 
+If downloads fail or hang:
+1. Check your internet connection
+2. Try reducing concurrent downloads: `--concurrent 2`
+3. Check GOG's server status
+4. Look at logs for specific error messages
 
-Requirements
-------------
-* Python 2.7 / Python 3.8+
-* html5lib 0.99999 or later (https://github.com/html5lib/html5lib-python)
-* requests
-* psutil
-Python 2.7 also requires
-* dateutil ( python-dateutil on pip )
-* pytz
-I recommend you use `pip` to install the above python modules.
+### API Server Issues
 
-  ``pip install html5lib html2text``
+If the API server won't start:
+1. Check if port 8000 is already in use
+2. Try a different port: `uvicorn gogrepoc.api.main:app --port 8080`
+3. Check logs for error messages
 
+### Web UI Issues
 
-Optional
-------------------------
+If the Web UI doesn't load:
+1. Make sure the API server is running
+2. Check browser console for errors
+3. Verify CORS settings if using separate servers
+4. Clear browser cache and reload
 
-* html2text 2015.6.21 or later (https://pypi.python.org/pypi/html2text) (optional, used for prettying up gog game changelog html)
-*nix:
-* dbus-python and required dependencies (*nix, optional, used to prevent suspend/sleep interrupts on *nix, where supported) (this will likely move to pydbus as it matures)
-Mac:
-* caffeinate support (optional, required to prevent suspend/sleep interrupts)
+## License
 
+GPLv3+
 
+## Contributing
 
-TODO
-----
-* ~~add ability to update and download specific games or new-items only~~
-* ~~add 'clean' command to orphan/remove old or unexpected files to keep your collection clean with only the latest files~~
-* ~~support resuming manifest updating~~
-* ~~add support for incremental manifest updating (ie. only fetch newly added games) rather than fetching entire collection information~~
-* ~~ability to customize/remap default game directory name~~
-* add GOG movie support
-* ... feel free to contact me with ideas or feature requests!
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Run the test suite
+5. Submit a pull request
+
+## Credits
+
+Based on the original gogrepo by [original author].
+Refactored and modernized by the community.
+
+## Support
+
+For issues, questions, or feature requests:
+- Open an issue on GitHub
+- Check existing issues for solutions
+- Consult the documentation
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and changes.
