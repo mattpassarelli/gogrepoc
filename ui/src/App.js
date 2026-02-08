@@ -11,11 +11,6 @@ import {
 } from "react-bootstrap";
 import axios from "axios";
 
-// Configure axios defaults
-const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
-axios.defaults.baseURL = apiUrl;
-axios.defaults.withCredentials = true;
-
 // Add custom dark mode styles
 const darkModeStyles = `
   .list-group-item {
@@ -53,7 +48,18 @@ const darkModeStyles = `
   }
 `;
 
-function App() {
+/**
+ * Main App Component
+ * 
+ * @param {Object} props - Component props
+ * @param {string} props.backendUrl - Backend API URL
+ * @param {boolean} props.isElectron - Whether running in Electron
+ * @param {boolean} props.backendAvailable - Whether backend is available
+ * @param {string} props.backendError - Backend connection error message
+ * 
+ * Requirements: 7.2, 7.3, 7.5
+ */
+function App({ backendUrl, isElectron = false, backendAvailable = true, backendError = null }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [availableGames, setAvailableGames] = useState([]);
@@ -72,14 +78,45 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+
+  /**
+   * Handle directory selection using native dialog (Electron only)
+   * Requirement 5.1: Display native dialog for directory selection
+   */
+  const handleSelectDirectory = async () => {
+    if (isElectron && window.electronAPI && window.electronAPI.selectDirectory) {
+      try {
+        const selectedPath = await window.electronAPI.selectDirectory();
+        if (selectedPath) {
+          setSavedir(selectedPath);
+        }
+      } catch (error) {
+        console.error('Failed to select directory:', error);
+        setError('Failed to open directory selection dialog');
+      }
+    }
+  };
   const [filterOS, setFilterOS] = useState("all");
   const [filterLang, setFilterLang] = useState("all");
   const [selectedGameForDetails, setSelectedGameForDetails] = useState(null);
   const [showGameDetailsModal, setShowGameDetailsModal] = useState(false);
 
+  // Configure axios with dynamic backend URL
+  useEffect(() => {
+    if (backendUrl) {
+      axios.defaults.baseURL = backendUrl;
+      axios.defaults.withCredentials = true;
+    }
+  }, [backendUrl]);
+
   // Check authentication and load games list on component mount
   useEffect(() => {
-    checkAuth();
+    // Only check auth if backend is available
+    if (backendAvailable) {
+      checkAuth();
+    } else if (backendError) {
+      setError(`Backend unavailable: ${backendError}`);
+    }
     
     // Load settings from localStorage
     const savedSavedir = localStorage.getItem("savedir");
@@ -91,7 +128,7 @@ function App() {
     if (savedCompress) setCompressDownloads(savedCompress === "true");
     if (savedFilterOS) setFilterOS(savedFilterOS);
     if (savedFilterLang) setFilterLang(savedFilterLang);
-  }, []);
+  }, [backendAvailable, backendError]);
 
   // Save settings to localStorage when they change
   useEffect(() => {
@@ -263,7 +300,7 @@ function App() {
   };
 
   const listenToDownloadProgress = (taskId) => {
-    const eventSource = new EventSource(`${apiUrl}/api/download-progress/${taskId}`);
+    const eventSource = new EventSource(`${backendUrl}/api/download-progress/${taskId}`);
     
     eventSource.onmessage = (event) => {
       try {
@@ -381,6 +418,31 @@ function App() {
       <style>{darkModeStyles}</style>
       <h1 className="text-light">GOG Installers Downloader</h1>
 
+      {/* Backend unavailable state */}
+      {!backendAvailable && (
+        <Alert variant="warning" className="mt-4">
+          <Alert.Heading>Backend Connection Issue</Alert.Heading>
+          <p>
+            {isElectron 
+              ? "The application backend is starting up or unavailable. Please wait..."
+              : "Cannot connect to the backend server. Please ensure the server is running."}
+          </p>
+          {backendError && (
+            <p className="mb-0">
+              <strong>Error:</strong> {backendError}
+            </p>
+          )}
+          <div className="mt-3">
+            <Button 
+              variant="outline-warning" 
+              onClick={() => window.location.reload()}
+            >
+              Retry Connection
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       {error && (
         <Alert variant="danger" dismissible>
           {error}
@@ -392,7 +454,7 @@ function App() {
         </Alert>
       )}
 
-      {!isAuthenticated && (
+      {!isAuthenticated && backendAvailable && (
         <Form onSubmit={handleLogin} className="mb-4">
           <Form.Group className="mb-3">
             <Form.Label>GOG Email</Form.Label>
@@ -415,7 +477,7 @@ function App() {
           <Button type="submit">Login</Button>
         </Form>
       )}
-      {isAuthenticated && (
+      {isAuthenticated && backendAvailable && (
         <>
           {/* Search and Filter Controls */}
           <Row className="mt-3 mb-3">
@@ -693,14 +755,38 @@ function App() {
               </Button>
               <div className="d-flex align-items-center gap-2">
                 <span>Download Path:</span>
-                <Form.Group style={{ width: "300px" }} className="m-0">
-                  <Form.Control
-                    type="text"
-                    value={savedir}
-                    onChange={(e) => setSavedir(e.target.value)}
-                    placeholder="Enter download path (e.g., C:/Games/GOG)"
-                  />
-                </Form.Group>
+                {isElectron ? (
+                  // Electron mode: Use native dialog with button and read-only display
+                  <>
+                    <Form.Group style={{ width: "300px" }} className="m-0">
+                      <Form.Control
+                        type="text"
+                        value={savedir}
+                        readOnly
+                        placeholder="No directory selected"
+                        title={savedir}
+                      />
+                    </Form.Group>
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      onClick={handleSelectDirectory}
+                      title="Select download directory"
+                    >
+                      Browse...
+                    </Button>
+                  </>
+                ) : (
+                  // Web mode: Use text input for manual entry
+                  <Form.Group style={{ width: "300px" }} className="m-0">
+                    <Form.Control
+                      type="text"
+                      value={savedir}
+                      onChange={(e) => setSavedir(e.target.value)}
+                      placeholder="Enter download path (e.g., C:/Games/GOG)"
+                    />
+                  </Form.Group>
+                )}
               </div>
               <div>
                 <div className="d-flex flex-column gap-2">

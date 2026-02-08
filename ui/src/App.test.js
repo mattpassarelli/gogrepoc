@@ -392,4 +392,199 @@ describe('App Component', () => {
       });
     });
   });
+
+  describe('Directory Selection', () => {
+    test('shows Browse button and read-only path field in Electron mode', async () => {
+      // Mock authenticated state
+      axios.get.mockImplementation((url) => {
+        if (url === '/api/check-auth') {
+          return Promise.resolve({ data: { authenticated: true } });
+        }
+        if (url === '/api/manifest') {
+          return Promise.resolve({ data: { games: [], total_count: 0 } });
+        }
+        return Promise.reject(new Error('Unknown URL'));
+      });
+      
+      render(<App isElectron={true} backendUrl="http://localhost:8000" />);
+      
+      // Wait for authentication check
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Browse/i })).toBeInTheDocument();
+      });
+      
+      // Path field should be read-only
+      const pathInput = screen.getByPlaceholderText(/No directory selected/i);
+      expect(pathInput).toHaveAttribute('readonly');
+    });
+
+    test('shows editable text input in web mode', async () => {
+      // Mock authenticated state
+      axios.get.mockImplementation((url) => {
+        if (url === '/api/check-auth') {
+          return Promise.resolve({ data: { authenticated: true } });
+        }
+        if (url === '/api/manifest') {
+          return Promise.resolve({ data: { games: [], total_count: 0 } });
+        }
+        return Promise.reject(new Error('Unknown URL'));
+      });
+      
+      render(<App isElectron={false} backendUrl="http://localhost:8000" />);
+      
+      // Wait for authentication check
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: /Browse/i })).not.toBeInTheDocument();
+      });
+      
+      // Path field should be editable
+      const pathInput = screen.getByPlaceholderText(/Enter download path/i);
+      expect(pathInput).not.toHaveAttribute('readonly');
+    });
+
+    test('calls electronAPI.selectDirectory when Browse button is clicked', async () => {
+      // Mock authenticated state
+      axios.get.mockImplementation((url) => {
+        if (url === '/api/check-auth') {
+          return Promise.resolve({ data: { authenticated: true } });
+        }
+        if (url === '/api/manifest') {
+          return Promise.resolve({ data: { games: [], total_count: 0 } });
+        }
+        return Promise.reject(new Error('Unknown URL'));
+      });
+      
+      // Mock electronAPI
+      const mockSelectDirectory = jest.fn().mockResolvedValue('/selected/path');
+      window.electronAPI = {
+        selectDirectory: mockSelectDirectory
+      };
+      
+      render(<App isElectron={true} backendUrl="http://localhost:8000" />);
+      
+      // Wait for Browse button to appear
+      const browseButton = await screen.findByRole('button', { name: /Browse/i });
+      fireEvent.click(browseButton);
+      
+      await waitFor(() => {
+        expect(mockSelectDirectory).toHaveBeenCalled();
+      });
+      
+      // Clean up
+      delete window.electronAPI;
+    });
+
+    test('updates path field when directory is selected', async () => {
+      // Mock authenticated state
+      axios.get.mockImplementation((url) => {
+        if (url === '/api/check-auth') {
+          return Promise.resolve({ data: { authenticated: true } });
+        }
+        if (url === '/api/manifest') {
+          return Promise.resolve({ data: { games: [], total_count: 0 } });
+        }
+        return Promise.reject(new Error('Unknown URL'));
+      });
+      
+      // Mock electronAPI
+      const mockSelectDirectory = jest.fn().mockResolvedValue('/new/selected/path');
+      window.electronAPI = {
+        selectDirectory: mockSelectDirectory
+      };
+      
+      render(<App isElectron={true} backendUrl="http://localhost:8000" />);
+      
+      // Wait for Browse button to appear
+      const browseButton = await screen.findByRole('button', { name: /Browse/i });
+      fireEvent.click(browseButton);
+      
+      await waitFor(() => {
+        const pathInput = screen.getByDisplayValue('/new/selected/path');
+        expect(pathInput).toBeInTheDocument();
+      });
+      
+      // Clean up
+      delete window.electronAPI;
+    });
+
+    test('handles directory selection cancellation gracefully', async () => {
+      // Mock authenticated state
+      axios.get.mockImplementation((url) => {
+        if (url === '/api/check-auth') {
+          return Promise.resolve({ data: { authenticated: true } });
+        }
+        if (url === '/api/manifest') {
+          return Promise.resolve({ data: { games: [], total_count: 0 } });
+        }
+        return Promise.reject(new Error('Unknown URL'));
+      });
+      
+      // Mock electronAPI returning null (user cancelled)
+      const mockSelectDirectory = jest.fn().mockResolvedValue(null);
+      window.electronAPI = {
+        selectDirectory: mockSelectDirectory
+      };
+      
+      render(<App isElectron={true} backendUrl="http://localhost:8000" />);
+      
+      // Wait for Browse button to appear
+      const browseButton = await screen.findByRole('button', { name: /Browse/i });
+      
+      const pathInput = screen.getByPlaceholderText(/No directory selected/i);
+      const initialPath = pathInput.value;
+      
+      fireEvent.click(browseButton);
+      
+      await waitFor(() => {
+        expect(mockSelectDirectory).toHaveBeenCalled();
+      });
+      
+      // Path should remain unchanged
+      expect(pathInput.value).toBe(initialPath);
+      
+      // Clean up
+      delete window.electronAPI;
+    });
+
+    test('handles directory selection errors gracefully', async () => {
+      // Mock authenticated state
+      axios.get.mockImplementation((url) => {
+        if (url === '/api/check-auth') {
+          return Promise.resolve({ data: { authenticated: true } });
+        }
+        if (url === '/api/manifest') {
+          return Promise.resolve({ data: { games: [], total_count: 0 } });
+        }
+        return Promise.reject(new Error('Unknown URL'));
+      });
+      
+      // Mock electronAPI throwing an error
+      const mockSelectDirectory = jest.fn().mockRejectedValue(new Error('IPC failed'));
+      window.electronAPI = {
+        selectDirectory: mockSelectDirectory
+      };
+      
+      // Suppress console.error for this test
+      const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+      
+      render(<App isElectron={true} backendUrl="http://localhost:8000" />);
+      
+      // Wait for Browse button to appear
+      const browseButton = await screen.findByRole('button', { name: /Browse/i });
+      fireEvent.click(browseButton);
+      
+      await waitFor(() => {
+        expect(mockSelectDirectory).toHaveBeenCalled();
+      });
+      
+      // Should display error message
+      await waitFor(() => {
+        expect(screen.getByText(/Failed to open directory selection dialog/i)).toBeInTheDocument();
+      });
+      
+      // Clean up
+      consoleError.mockRestore();
+      delete window.electronAPI;
+    });
+  });
 });

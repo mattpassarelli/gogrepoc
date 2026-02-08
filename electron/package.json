@@ -10,6 +10,9 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:electron\"",
     "dev:backend": "cd .. && python -m uvicorn gogrepoc.api.main:app --reload --port 8000",
     "dev:electron": "NODE_ENV=development electron . --dev",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "build": "npm run build:backend && npm run build:electron",
     "build:backend": "cd ../backend && pyinstaller gogrepoc.spec",
     "build:electron": "electron-builder",
@@ -35,31 +38,65 @@
       {
         "from": "../backend/dist/",
         "to": "backend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "publisherName": "GOGRepoc Contributors"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GOGRepoc",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeader": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "menuCategory": true,
+      "displayLanguageSelector": false,
+      "perMachine": false
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "mac": {
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "build/icon.icns",
@@ -76,12 +113,26 @@
     }
   },
   "dependencies": {
-    "electron-store": "^8.1.0",
-    "electron-log": "^5.0.0"
+    "electron-log": "^5.0.0",
+    "electron-store": "^8.1.0"
   },
   "devDependencies": {
+    "concurrently": "^8.2.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.0",
-    "concurrently": "^8.2.0"
+    "fast-check": "^4.5.3",
+    "jest": "^30.2.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "main.js",
+      "preload.js"
+    ],
+    "coverageDirectory": "coverage",
+    "testTimeout": 30000
   }
 }

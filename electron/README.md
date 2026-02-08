@@ -63,28 +63,35 @@ This will:
 
 ## Building for Production
 
-### Build Backend
+For detailed build instructions, see [BUILD.md](BUILD.md).
 
-First, build the Python backend with PyInstaller:
+### Quick Start
 
-```bash
-npm run build:backend
-```
-
-This creates a standalone executable in `../backend/dist/`.
-
-### Build Electron App
-
-Build for all platforms:
+Build everything:
 ```bash
 npm run build
 ```
 
-Or build for specific platforms:
+This will:
+1. Build the Python backend with PyInstaller (`npm run build:backend`)
+2. Package the Electron app with electron-builder (`npm run build:electron`)
+
+### Platform-Specific Builds
+
+Build for specific platforms:
 ```bash
 npm run build:win    # Windows (NSIS installer + portable)
 npm run build:mac    # macOS (DMG + ZIP)
 npm run build:linux  # Linux (AppImage, deb, rpm)
+```
+
+**Note**: The React frontend must be built separately before running the Electron build:
+```bash
+cd ../ui
+npm install
+npm run build
+cd ../electron
+npm run build
 ```
 
 Output will be in `electron/dist/`.
