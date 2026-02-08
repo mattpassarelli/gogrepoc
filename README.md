@@ -1,12 +1,15 @@
 # GOGRepoc - GOG Game Collection Manager
 
+[![Build Electron Desktop App](https://github.com/yourusername/gogrepoc/actions/workflows/electron-build.yml/badge.svg)](https://github.com/yourusername/gogrepoc/actions/workflows/electron-build.yml)
+
 Python-based tool for downloading and managing your GOG.com game collections and extras to your local computer for full offline enjoyment.
 
 **Note:** This is a refactored version with improved architecture, modern Python practices, and multiple interfaces (CLI, API, Web UI).
 
 ## Features
 
-* **Multiple Interfaces**: Command-line (CLI), REST API, and Web UI
+* **Multiple Interfaces**: Command-line (CLI), REST API, Web UI, and Desktop Application
+* **Desktop Application**: Native Electron-based desktop app for Windows, macOS, and Linux
 * **Modern Architecture**: Clean separation of concerns with services, infrastructure, and API layers
 * **Async Support**: Efficient async/await for network operations
 * **Download Management**: Resume support, MD5 verification, concurrent downloads
@@ -29,6 +32,32 @@ Python-based tool for downloading and managing your GOG.com game collections and
   - `cryptography` - Secure token storage
 
 ## Installation
+
+### Desktop Application (Recommended for Most Users)
+
+The easiest way to use GOGRepoc is with the native desktop application. Download the latest release for your platform:
+
+**[Download Latest Release](https://github.com/yourusername/gogrepoc/releases/latest)**
+
+**Windows**:
+- Download `GOGRepoc-<version>-x64.exe` (installer) or `GOGRepoc-<version>-portable.exe`
+- Run the installer or portable executable
+- No Python installation required
+
+**macOS**:
+- Download `GOGRepoc-<version>.dmg`
+- Open the DMG and drag GOGRepoc to Applications
+- Right-click → Open (first time only, to bypass Gatekeeper)
+- No Python installation required
+
+**Linux**:
+- Download `GOGRepoc-<version>.AppImage`, `.deb`, or `.rpm`
+- **AppImage**: `chmod +x GOGRepoc-*.AppImage && ./GOGRepoc-*.AppImage`
+- **Debian/Ubuntu**: `sudo dpkg -i gogrepoc-desktop_*_amd64.deb`
+- **Fedora/RHEL**: `sudo rpm -i gogrepoc-desktop-*.x86_64.rpm`
+- No Python installation required
+
+For desktop app documentation, see [electron/README.md](electron/README.md).
 
 ### Using uv (Recommended)
 
@@ -349,6 +378,26 @@ python -m pytest -v
 ```
 
 ## Development
+
+### Releases and CI/CD
+
+The project uses GitHub Actions for automated builds and releases:
+
+**Creating a Release**:
+1. Update version in `package.json` and `pyproject.toml`
+2. Commit changes: `git commit -am "Release v1.0.0"`
+3. Create and push tag: `git tag v1.0.0 && git push origin v1.0.0`
+4. GitHub Actions automatically builds for all platforms
+5. Release is created with installers attached
+
+**Build Status**: Check the [Actions tab](https://github.com/yourusername/gogrepoc/actions) for build status
+
+**Versioning**: Follow [Semantic Versioning](https://semver.org/):
+- **Major** (v2.0.0): Breaking changes
+- **Minor** (v1.1.0): New features, backwards compatible
+- **Patch** (v1.0.1): Bug fixes
+
+For detailed build documentation, see [.github/workflows/README.md](.github/workflows/README.md).
 
 ### Code Style
 
