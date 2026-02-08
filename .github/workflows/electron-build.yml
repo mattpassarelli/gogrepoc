@@ -1,0 +1,161 @@
+name: Build Electron Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on version tags like v1.0.0, v2.1.3, etc.
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            artifact_name: GOGRepoc-*-x64.exe
+          - os: macos-latest
+            platform: mac
+            artifact_name: GOGRepoc-*.dmg
+          - os: ubuntu-latest
+            platform: linux
+            artifact_name: GOGRepoc-*.AppImage
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # ============================================================
+      # Python Backend Build
+      # ============================================================
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      
+      - name: Build Python backend with PyInstaller (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd backend
+          chmod +x build.sh
+          ./build.sh
+      
+      - name: Build Python backend with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd backend
+          .\build.bat
+      
+      - name: Verify backend executable exists
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            ls -la backend/dist/gogrepoc.exe
+          else
+            ls -la backend/dist/gogrepoc
+          fi
+        shell: bash
+      
+      # ============================================================
+      # Electron Build
+      # ============================================================
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+      
+      - name: Install Electron dependencies
+        run: |
+          cd electron
+          npm ci
+      
+      - name: Build Electron app for ${{ matrix.platform }}
+        run: |
+          cd electron
+          npm run build:${{ matrix.platform }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # ============================================================
+      # Upload Artifacts
+      # ============================================================
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-build
+          path: |
+            electron/dist/${{ matrix.artifact_name }}
+            electron/dist/*.exe
+            electron/dist/*.dmg
+            electron/dist/*.AppImage
+            electron/dist/*.deb
+            electron/dist/*.rpm
+          retention-days: 7
+      
+      - name: Generate checksums
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd electron/dist
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            certutil -hashfile *.exe SHA256 > checksums-${{ matrix.platform }}.txt
+          else
+            shasum -a 256 * > checksums-${{ matrix.platform }}.txt 2>/dev/null || true
+          fi
+        shell: bash
+      
+      - name: Upload checksums
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ matrix.platform }}
+          path: electron/dist/checksums-${{ matrix.platform }}.txt
+          retention-days: 90
+
+  # ============================================================
+  # Create GitHub Release
+  # ============================================================
+  
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/win-build/*
+            artifacts/mac-build/*
+            artifacts/linux-build/*
+            artifacts/checksums-*/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
