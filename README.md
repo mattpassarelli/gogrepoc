@@ -1,5 +1,14 @@
 # GOGRepoc - GOG Game Collection Manager
 
+## WIP Notice
+
+In the effort of transparency, as it currently sits, a *massive* amount of this codebase's refactoring was done by Claude via Amazon's Kiro IDE. I had the opportunity to attend a training workshop and was told I needed a project idea in mind. Which lead to this refactor of the original forked project. 
+
+At the time of this README commit, a large amount of this refactor was done by Kiro/Claude and remains mostly untested. As with a lot of AI code I've seen and written, it's pretty buggy and broken, having only a basic high-level grasps as to what is needed. I've started going through code by hand to start fixing things, mostly just relying on the AI to have generated workspace structure and boilerplate the new models and classes. Right now, Logging-In via the CLI works, but downloads are broken and the UI and electron builds are completely untested.
+
+---
+
+
 [![Build Electron Desktop App](https://github.com/yourusername/gogrepoc/actions/workflows/electron-build.yml/badge.svg)](https://github.com/yourusername/gogrepoc/actions/workflows/electron-build.yml)
 
 Python-based tool for downloading and managing your GOG.com game collections and extras to your local computer for full offline enjoyment.
